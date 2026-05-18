@@ -38,6 +38,10 @@ def create_llm_client(
     """
     provider_lower = provider.lower()
 
+    if provider_lower == "openai-codex":
+        from .openai_codex_client import OpenAICodexClient
+        return OpenAICodexClient(model, base_url, **kwargs)
+
     if provider_lower in _OPENAI_COMPATIBLE:
         from .openai_client import OpenAIClient
         return OpenAIClient(model, base_url, provider=provider_lower, **kwargs)

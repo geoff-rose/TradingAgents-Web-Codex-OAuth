@@ -141,6 +141,19 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
+    "openai-codex": {
+        "quick": [
+            ("GPT-5.5 - ChatGPT Codex OAuth", "gpt-5.5"),
+            ("GPT-5.4 Mini - ChatGPT Codex OAuth", "gpt-5.4-mini"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("GPT-5.5 - ChatGPT Codex OAuth", "gpt-5.5"),
+            ("GPT-5.4 - ChatGPT Codex OAuth", "gpt-5.4"),
+            ("GPT-5.3 Codex Spark - Codex-only where entitled", "gpt-5.3-codex-spark"),
+            ("Custom model ID", "custom"),
+        ],
+    },
     # Qwen: same model IDs across global (dashscope-intl) and China
     # (dashscope) endpoints, so the two provider keys share one model list.
     "qwen": _QWEN_MODELS,
