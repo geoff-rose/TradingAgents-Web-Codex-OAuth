@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 from io import StringIO
 from pathlib import Path
 
@@ -47,12 +47,35 @@ def fetch_asx200_tickers() -> list[str]:
 
 
 def report_exists(ticker: str, trade_date: str) -> bool:
-    """Return True if a completed report already exists for this ticker+date."""
+    """Return True if a completed report less than 7 days old exists for this ticker."""
     base = LOGS_DIR / ticker
-    if (base / trade_date / "reports" / "final_trade_decision.md").exists():
-        return True
-    if (base / "TradingAgentsStrategy_logs" / f"full_states_log_{trade_date}.json").exists():
-        return True
+    if not base.exists():
+        return False
+
+    cutoff = date.today() - timedelta(days=7)
+
+    # New format: logs/{ticker}/{YYYY-MM-DD}/reports/final_trade_decision.md
+    for d in base.iterdir():
+        if not d.is_dir() or d.name == "TradingAgentsStrategy_logs":
+            continue
+        try:
+            if date.fromisoformat(d.name) >= cutoff:
+                if (d / "reports" / "final_trade_decision.md").exists():
+                    return True
+        except ValueError:
+            continue
+
+    # Legacy format: logs/{ticker}/TradingAgentsStrategy_logs/full_states_log_{date}.json
+    legacy_dir = base / "TradingAgentsStrategy_logs"
+    if legacy_dir.exists():
+        for f in legacy_dir.glob("full_states_log_*.json"):
+            try:
+                report_date = date.fromisoformat(f.stem.replace("full_states_log_", ""))
+                if report_date >= cutoff:
+                    return True
+            except ValueError:
+                continue
+
     return False
 
 
