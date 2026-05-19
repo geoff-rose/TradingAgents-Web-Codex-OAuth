@@ -27,6 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_news,
 )
+from tradingagents.dataflows.hotcopper import fetch_hotcopper_posts
 from tradingagents.dataflows.reddit import ASX_SUBREDDITS, DEFAULT_SUBREDDITS, fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
@@ -58,6 +59,7 @@ def create_sentiment_analyst(llm):
         news_block = get_news.func(ticker, start_date, end_date)
         stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
         reddit_block = fetch_reddit_posts(ticker)
+        hotcopper_block = fetch_hotcopper_posts(ticker) if is_asx else None
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -67,6 +69,7 @@ def create_sentiment_analyst(llm):
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
             reddit_subs=reddit_subs,
+            hotcopper_block=hotcopper_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -109,6 +112,7 @@ def _build_system_message(
     stocktwits_block: str,
     reddit_block: str,
     reddit_subs: tuple[str, ...],
+    hotcopper_block: str | None,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
     subs_label = ", ".join(f"r/{s}" for s in reddit_subs)
@@ -122,7 +126,17 @@ def _build_system_message(
         "Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; "
         "r/stocks more measured; r/investing longer-term)."
     )
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+    source_count = 4 if hotcopper_block else 3
+    hc_section = f"""
+### HotCopper threads — Australia's dominant retail investor forum
+The most active ASX retail forum. Thread titles reflect what Australian retail investors are focused on. [Ann] threads are official ASX announcements; user threads show actual retail sentiment. Badge tags (Bullish/Bearish) are user-applied signals.
+
+<start_of_hotcopper>
+{hotcopper_block}
+<end_of_hotcopper>
+""" if hotcopper_block else ""
+
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on {source_count} complementary data sources that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -146,7 +160,7 @@ Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish /
 <start_of_reddit>
 {reddit_block}
 <end_of_reddit>
-
+{hc_section}
 ## How to analyze this data (best practices)
 
 1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
