@@ -57,7 +57,11 @@ def create_sentiment_analyst(llm):
         reddit_subs = ASX_SUBREDDITS if is_asx else DEFAULT_SUBREDDITS
 
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
+        # StockTwits is US-centric and uses bare ticker symbols with no exchange
+        # disambiguation. For ASX tickers this returns data for whatever US stock
+        # shares the same 3-letter code (e.g. ALK.AX → Alaska Airlines), which is
+        # actively misleading. Skip it for ASX stocks; use HotCopper instead.
+        stocktwits_block = None if is_asx else fetch_stocktwits_messages(ticker, limit=30)
         reddit_block = fetch_reddit_posts(ticker)
         hotcopper_block = fetch_hotcopper_posts(ticker) if is_asx else None
 
@@ -109,7 +113,7 @@ def _build_system_message(
     start_date: str,
     end_date: str,
     news_block: str,
-    stocktwits_block: str,
+    stocktwits_block: str | None,
     reddit_block: str,
     reddit_subs: tuple[str, ...],
     hotcopper_block: str | None,
@@ -126,7 +130,16 @@ def _build_system_message(
         "Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; "
         "r/stocks more measured; r/investing longer-term)."
     )
-    source_count = 4 if hotcopper_block else 3
+
+    st_section = f"""
+### StockTwits messages — retail-trader social platform indexed by cashtag
+Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
+
+<start_of_stocktwits>
+{stocktwits_block}
+<end_of_stocktwits>
+""" if stocktwits_block else ""
+
     hc_section = f"""
 ### HotCopper threads — Australia's dominant retail investor forum
 The most active ASX retail forum. Thread titles reflect what Australian retail investors are focused on. [Ann] threads are official ASX announcements; user threads show actual retail sentiment. Badge tags (Bullish/Bearish) are user-applied signals.
@@ -135,6 +148,8 @@ The most active ASX retail forum. Thread titles reflect what Australian retail i
 {hotcopper_block}
 <end_of_hotcopper>
 """ if hotcopper_block else ""
+
+    source_count = 2 + bool(stocktwits_block) + bool(hotcopper_block)
 
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on {source_count} complementary data sources that have already been collected for you.
 
@@ -146,14 +161,7 @@ Institutional framing. Fact-driven, slower-moving signal.
 <start_of_news>
 {news_block}
 <end_of_news>
-
-### StockTwits messages — retail-trader social platform indexed by cashtag
-Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
-
-<start_of_stocktwits>
-{stocktwits_block}
-<end_of_stocktwits>
-
+{st_section}
 ### Reddit posts — {subs_label} (past 7 days)
 {reddit_context}
 
