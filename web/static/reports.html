@@ -363,24 +363,48 @@
   ];
 
   // ── Signal detection ────────────────────────────────────────────────
+  // Only inspect the first 1000 chars (the heading/summary section).
+  // Body text can contain phrases like "conditions to upgrade to Overweight"
+  // which would cause false positives if we searched the full document.
   function parseDecision(text) {
-    const t = (text || '').toUpperCase();
-    const checks = [
-      ['STRONG BUY',   'BUY',  'Strong Buy'],
-      ['OVERWEIGHT',   'BUY',  'Overweight'],
-      ['STRONG SELL',  'SELL', 'Strong Sell'],
-      ['UNDERWEIGHT',  'SELL', 'Underweight'],
-      ['MARKET WEIGHT','HOLD', 'Market Weight'],
-      ['EQUAL WEIGHT', 'HOLD', 'Equal Weight'],
-      ['BUY',          'BUY',  'Buy'],
-      ['SELL',         'SELL', 'Sell'],
-      ['HOLD',         'HOLD', 'Hold'],
-      ['NEUTRAL',      'HOLD', 'Neutral'],
+    const header = (text || '').slice(0, 1000);
+
+    // 1. Explicit "Rating: SIGNAL" line (most reliable)
+    const ratingMatch = header.match(/Rating:\s*\*{0,2}(Strong Buy|Strong Sell|Overweight|Underweight|Hold|Buy|Sell)\b/i);
+    if (ratingMatch) return classify(ratingMatch[1]);
+
+    // 2. Extract **...** bold spans and look for signal words inside them
+    const boldRe = /\*\*([^*\n]{1,120})\*\*/g;
+    const signals = [
+      ['strong buy',  'BUY',  'Strong Buy'],
+      ['strong sell', 'SELL', 'Strong Sell'],
+      ['overweight',  'BUY',  'Overweight'],
+      ['underweight', 'SELL', 'Underweight'],
+      ['hold',        'HOLD', 'Hold'],
+      ['buy',         'BUY',  'Buy'],
+      ['sell',        'SELL', 'Sell'],
     ];
-    for (const [needle, signal, label] of checks) {
-      if (t.includes(needle)) return { signal, label };
+    let m;
+    while ((m = boldRe.exec(header)) !== null) {
+      const span = m[1].toLowerCase();
+      for (const [kw, signal, label] of signals) {
+        if (!span.includes(kw)) continue;
+        // Skip negated: "not a strong buy"
+        const idx = span.indexOf(kw);
+        if (/\bnot\b/.test(span.slice(0, idx))) continue;
+        return { signal, label };
+      }
     }
+
     return { signal: 'UNKNOWN', label: '—' };
+  }
+
+  function classify(raw) {
+    const r = (raw || '').toLowerCase().trim();
+    const label = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    if (r === 'strong buy'  || r === 'overweight' || r === 'buy')  return { signal: 'BUY',  label };
+    if (r === 'strong sell' || r === 'underweight' || r === 'sell') return { signal: 'SELL', label };
+    return { signal: 'HOLD', label };
   }
 
   // ── Sidebar ─────────────────────────────────────────────────────────
