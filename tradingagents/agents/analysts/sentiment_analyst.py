@@ -27,7 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_news,
 )
-from tradingagents.dataflows.reddit import fetch_reddit_posts
+from tradingagents.dataflows.reddit import ASX_SUBREDDITS, DEFAULT_SUBREDDITS, fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
 
@@ -52,6 +52,9 @@ def create_sentiment_analyst(llm):
         # Pre-fetch all three sources. Each fetcher degrades gracefully and
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
+        is_asx = ticker.upper().endswith(".AX")
+        reddit_subs = ASX_SUBREDDITS if is_asx else DEFAULT_SUBREDDITS
+
         news_block = get_news.func(ticker, start_date, end_date)
         stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
         reddit_block = fetch_reddit_posts(ticker)
@@ -63,6 +66,7 @@ def create_sentiment_analyst(llm):
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
+            reddit_subs=reddit_subs,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -104,8 +108,20 @@ def _build_system_message(
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
+    reddit_subs: tuple[str, ...],
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
+    subs_label = ", ".join(f"r/{s}" for s in reddit_subs)
+    is_asx = ticker.upper().endswith(".AX")
+    reddit_context = (
+        "Australian retail investor community discussion. r/AusFinance skews toward long-term investors; "
+        "r/ASX is ticker-focused with more active traders; r/ausstocks is more speculative. "
+        "Engagement via upvote score and comment count."
+        if is_asx else
+        "Community discussion. Engagement signal via upvote score and comment count. "
+        "Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; "
+        "r/stocks more measured; r/investing longer-term)."
+    )
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
@@ -124,8 +140,8 @@ Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish /
 {stocktwits_block}
 <end_of_stocktwits>
 
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
-Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
+### Reddit posts — {subs_label} (past 7 days)
+{reddit_context}
 
 <start_of_reddit>
 {reddit_block}
