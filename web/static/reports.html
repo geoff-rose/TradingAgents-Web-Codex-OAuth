@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradingAgents — Reports</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d0f;
+    --surface: #16161a;
+    --surface2: #1e1e24;
+    --border: #2a2a32;
+    --text: #e8e8f0;
+    --muted: #666;
+    --accent: #5b8cff;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --header-h: 53px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    height: var(--header-h);
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .logo { font-size: 17px; font-weight: 700; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a {
+    font-size: 13px;
+    color: var(--muted);
+    text-decoration: none;
+    padding: 5px 11px;
+    border-radius: 6px;
+    transition: background 0.12s, color 0.12s;
+  }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+
+  /* ── Layout ── */
+  .layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* ── Ticker sidebar ── */
+  .sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: #2a2a32; border-radius: 2px; }
+
+  .ticker-group { margin-bottom: 4px; }
+  .ticker-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text);
+    border-radius: 0;
+    transition: background 0.1s;
+  }
+  .ticker-label:hover { background: var(--surface2); }
+  .ticker-label .chevron { font-size: 9px; color: var(--muted); transition: transform 0.15s; }
+  .ticker-label.open .chevron { transform: rotate(90deg); }
+
+  .date-list { display: none; }
+  .date-list.open { display: block; }
+  .date-item {
+    padding: 5px 14px 5px 26px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+  }
+  .date-item:hover { background: var(--surface2); color: var(--text); }
+  .date-item.active { background: #141e38; color: var(--accent); }
+
+  .sidebar-empty {
+    padding: 20px 14px;
+    font-size: 12px;
+    color: #444;
+  }
+
+  /* ── Report viewer ── */
+  .viewer {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Placeholder */
+  .placeholder {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: #3a3a44;
+  }
+  .placeholder .icon { font-size: 44px; }
+  .placeholder p { font-size: 14px; }
+
+  /* Report header bar */
+  .report-header {
+    display: none;
+    flex-shrink: 0;
+    padding: 14px 24px 0;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .report-header.visible { display: flex; }
+
+  .report-badge {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    padding: 3px 12px;
+    border-radius: 5px;
+  }
+  .BUY  .report-badge { background: #16532a; color: var(--green); }
+  .SELL .report-badge { background: #531616; color: var(--red); }
+  .HOLD .report-badge { background: #534010; color: var(--yellow); }
+  .UNKNOWN .report-badge { background: var(--surface2); color: #666; }
+
+  .report-title { font-size: 18px; font-weight: 700; }
+  .report-date  { font-size: 12px; color: var(--muted); }
+
+  /* Tab bar */
+  .tab-bar {
+    display: none;
+    flex-shrink: 0;
+    padding: 12px 24px 0;
+    border-bottom: 1px solid var(--border);
+    gap: 2px;
+    overflow-x: auto;
+  }
+  .tab-bar.visible { display: flex; }
+  .tab-bar::-webkit-scrollbar { height: 0; }
+
+  .tab-btn {
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.12s, border-color 0.12s;
+    margin-bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  /* Tab panels wrapper — must fill remaining viewer height */
+  #tab-panels {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Tab content */
+  .tab-content {
+    height: 100%;
+    overflow-y: auto;
+    padding: 24px;
+    display: none;
+  }
+  .tab-content.active { display: block; }
+  .tab-content::-webkit-scrollbar { width: 5px; }
+  .tab-content::-webkit-scrollbar-thumb { background: #2a2a32; border-radius: 3px; }
+
+  /* Decision panel inside Decision tab */
+  .decision-panel {
+    border-radius: 9px;
+    padding: 18px 22px;
+    border: 1px solid;
+    margin-bottom: 20px;
+  }
+  .decision-panel.BUY  { background: #0d1f14; border-color: #1a4a28; }
+  .decision-panel.SELL { background: #1f0d0d; border-color: #4a1a1a; }
+  .decision-panel.HOLD { background: #1a1608; border-color: #4a3a10; }
+  .decision-panel.UNKNOWN { background: var(--surface); border-color: var(--border); }
+
+  /* Markdown styles */
+  .md-body h1 { font-size: 22px; font-weight: 700; margin: 20px 0 10px; color: var(--text); }
+  .md-body h2 { font-size: 17px; font-weight: 700; margin: 18px 0 8px; color: var(--text); }
+  .md-body h3 { font-size: 14px; font-weight: 700; margin: 14px 0 6px; color: #ccc; }
+  .md-body h4 { font-size: 13px; font-weight: 600; margin: 12px 0 5px; color: #aaa; }
+  .md-body p  { font-size: 13px; line-height: 1.75; color: #bbb; margin-bottom: 10px; }
+  .md-body ul, .md-body ol { padding-left: 20px; margin-bottom: 10px; }
+  .md-body li { font-size: 13px; line-height: 1.7; color: #bbb; margin-bottom: 3px; }
+  .md-body strong { color: var(--text); font-weight: 600; }
+  .md-body em { color: #aaa; }
+  .md-body code {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    color: #a78bfa;
+  }
+  .md-body pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin-bottom: 12px;
+  }
+  .md-body pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 12px;
+    color: #ccc;
+  }
+  .md-body hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 16px 0;
+  }
+  .md-body blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 6px 14px;
+    margin: 10px 0;
+    background: var(--surface2);
+    border-radius: 0 5px 5px 0;
+  }
+  .md-body blockquote p { margin: 0; color: #aaa; }
+  .md-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 14px;
+    font-size: 12px;
+  }
+  .md-body th {
+    text-align: left;
+    padding: 7px 10px;
+    background: var(--surface2);
+    color: #aaa;
+    font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .md-body td {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    color: #bbb;
+    vertical-align: top;
+  }
+  .md-body tr:nth-child(even) td { background: #13131700; }
+  .md-body tr:hover td { background: var(--surface2); }
+  .md-body a { color: var(--accent); text-decoration: none; }
+  .md-body a:hover { text-decoration: underline; }
+
+  /* Loading spinner */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 40px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="/">TradingAgents</a>
+  <nav>
+    <a href="/">Run Analysis</a>
+    <a href="/reports" class="active">Reports</a>
+  </nav>
+</header>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="loading"><div class="spinner"></div>Loading…</div>
+  </aside>
+
+  <!-- Viewer -->
+  <div class="viewer" id="viewer">
+
+    <div class="placeholder" id="placeholder">
+      <div class="icon">📂</div>
+      <p>Select a report from the list.</p>
+    </div>
+
+    <div class="report-header" id="report-header">
+      <div id="rh-badge-wrap">
+        <span class="report-badge" id="rh-badge">—</span>
+      </div>
+      <div>
+        <div class="report-title" id="rh-title"></div>
+        <div class="report-date"  id="rh-date"></div>
+      </div>
+    </div>
+
+    <div class="tab-bar" id="tab-bar"></div>
+
+    <div id="tab-panels"></div>
+
+  </div>
+</div>
+
+<script>
+  // ── Config ──────────────────────────────────────────────────────────
+  const TABS = [
+    { key: 'final_trade_decision',  label: '🎯 Decision' },
+    { key: 'market_report',         label: '📊 Market' },
+    { key: 'sentiment_report',      label: '💬 Sentiment' },
+    { key: 'news_report',           label: '📰 News' },
+    { key: 'fundamentals_report',   label: '📋 Fundamentals' },
+    { key: 'investment_plan',       label: '🧠 Research' },
+    { key: 'trader_investment_plan',label: '💼 Trader' },
+  ];
+
+  // ── Signal detection ────────────────────────────────────────────────
+  function parseDecision(text) {
+    const t = (text || '').toUpperCase();
+    const checks = [
+      ['STRONG BUY',   'BUY',  'Strong Buy'],
+      ['OVERWEIGHT',   'BUY',  'Overweight'],
+      ['STRONG SELL',  'SELL', 'Strong Sell'],
+      ['UNDERWEIGHT',  'SELL', 'Underweight'],
+      ['MARKET WEIGHT','HOLD', 'Market Weight'],
+      ['EQUAL WEIGHT', 'HOLD', 'Equal Weight'],
+      ['BUY',          'BUY',  'Buy'],
+      ['SELL',         'SELL', 'Sell'],
+      ['HOLD',         'HOLD', 'Hold'],
+      ['NEUTRAL',      'HOLD', 'Neutral'],
+    ];
+    for (const [needle, signal, label] of checks) {
+      if (t.includes(needle)) return { signal, label };
+    }
+    return { signal: 'UNKNOWN', label: '—' };
+  }
+
+  // ── Sidebar ─────────────────────────────────────────────────────────
+  async function loadSidebar() {
+    const res = await fetch('/api/reports');
+    const reports = await res.json();
+    const sidebar = document.getElementById('sidebar');
+    sidebar.innerHTML = '';
+
+    if (!reports.length) {
+      sidebar.innerHTML = '<div class="sidebar-empty">No saved reports yet.</div>';
+      return;
+    }
+
+    // Group by ticker
+    const grouped = {};
+    for (const r of reports) {
+      (grouped[r.ticker] ||= []).push(r.date);
+    }
+
+    for (const [ticker, dates] of Object.entries(grouped)) {
+      const grp = document.createElement('div');
+      grp.className = 'ticker-group';
+
+      const label = document.createElement('div');
+      label.className = 'ticker-label';
+      label.innerHTML = `<span>${ticker}</span><span class="chevron">▶</span>`;
+      label.onclick = () => {
+        label.classList.toggle('open');
+        dateList.classList.toggle('open');
+      };
+
+      const dateList = document.createElement('div');
+      dateList.className = 'date-list';
+
+      for (const date of dates) {
+        const item = document.createElement('div');
+        item.className = 'date-item';
+        item.textContent = date;
+        item.dataset.ticker = ticker;
+        item.dataset.date   = date;
+        item.onclick = () => loadReport(ticker, date, item);
+        dateList.appendChild(item);
+      }
+
+      grp.appendChild(label);
+      grp.appendChild(dateList);
+      sidebar.appendChild(grp);
+
+      // Auto-expand if only one ticker
+      if (Object.keys(grouped).length === 1) {
+        label.classList.add('open');
+        dateList.classList.add('open');
+      }
+    }
+  }
+
+  // ── Report loader ────────────────────────────────────────────────────
+  async function loadReport(ticker, date, itemEl) {
+    // Highlight active item
+    document.querySelectorAll('.date-item').forEach(el => el.classList.remove('active'));
+    itemEl.classList.add('active');
+
+    // Show loading state
+    document.getElementById('placeholder').style.display = 'none';
+    const tabBar    = document.getElementById('tab-bar');
+    const tabPanels = document.getElementById('tab-panels');
+    const rhHeader  = document.getElementById('report-header');
+    tabBar.innerHTML    = '<div class="loading" style="padding:12px 0"><div class="spinner"></div></div>';
+    tabPanels.innerHTML = '';
+    tabBar.classList.add('visible');
+    rhHeader.classList.remove('visible');
+
+    // Fetch report data
+    let data;
+    try {
+      const res = await fetch(`/api/reports/${encodeURIComponent(ticker)}/${encodeURIComponent(date)}`);
+      if (!res.ok) throw new Error(await res.text());
+      data = await res.json();
+    } catch (e) {
+      tabBar.innerHTML = `<div style="padding:12px 24px;color:#ef4444;font-size:13px">Failed to load: ${e.message}</div>`;
+      return;
+    }
+
+    // Render header
+    const { signal, label } = parseDecision(data.final_trade_decision || '');
+    const badgeWrap = document.getElementById('rh-badge-wrap');
+    badgeWrap.className = signal;
+    document.getElementById('rh-badge').textContent  = label;
+    document.getElementById('rh-title').textContent  = ticker;
+    document.getElementById('rh-date').textContent   = date;
+    rhHeader.classList.add('visible');
+
+    // Build tabs (only for fields that have content)
+    const activeTabs = TABS.filter(t => (data[t.key] || '').trim());
+    tabBar.innerHTML = '';
+    tabPanels.innerHTML = '';
+
+    activeTabs.forEach((tab, i) => {
+      // Tab button
+      const btn = document.createElement('button');
+      btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
+      btn.textContent = tab.label;
+      btn.onclick = () => switchTab(tab.key);
+      tabBar.appendChild(btn);
+
+      // Tab panel
+      const panel = document.createElement('div');
+      panel.className = 'tab-content' + (i === 0 ? ' active' : '');
+      panel.id = `panel-${tab.key}`;
+
+      const content = data[tab.key] || '';
+
+      if (tab.key === 'final_trade_decision') {
+        // Decision tab: coloured panel + rendered markdown
+        const dp = document.createElement('div');
+        dp.className = `decision-panel ${signal}`;
+        dp.innerHTML = `<div class="md-body">${marked.parse(content)}</div>`;
+        panel.appendChild(dp);
+      } else {
+        panel.innerHTML = `<div class="md-body" style="animation:fadeIn 0.15s ease">${marked.parse(content)}</div>`;
+      }
+
+      tabPanels.appendChild(panel);
+    });
+
+    if (!activeTabs.length) {
+      tabBar.innerHTML = '<div style="padding:12px 24px;color:#555;font-size:13px">No content in this report.</div>';
+    }
+  }
+
+  function switchTab(key) {
+    document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+      const tab = document.querySelectorAll('.tab-btn')[i];
+      btn.classList.toggle('active', btn.textContent === TABS.find(t => t.key === key)?.label);
+    });
+    document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
+    const panel = document.getElementById(`panel-${key}`);
+    if (panel) { panel.classList.add('active'); panel.scrollTop = 0; }
+
+    // Sync button active state properly
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      const matchKey = TABS.find(t => t.label === btn.textContent)?.key;
+      btn.classList.toggle('active', matchKey === key);
+    });
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────
+  marked.setOptions({ breaks: true, gfm: true });
+  loadSidebar();
+</script>
+</body>
+</html>

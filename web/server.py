@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import traceback
 import uuid
@@ -21,6 +22,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 app = FastAPI(title="TradingAgents Web")
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Reports are stored under ~/.tradingagents/logs (respects TRADINGAGENTS_RESULTS_DIR override)
+_HOME = Path.home() / ".tradingagents"
+LOGS_DIR = Path(os.getenv("TRADINGAGENTS_RESULTS_DIR", str(_HOME / "logs")))
+
+# Report fields in display order; covers both new (md files) and legacy (JSON keys) formats
+_REPORT_FIELDS = [
+    ("final_trade_decision",  "Decision"),
+    ("market_report",         "Market"),
+    ("sentiment_report",      "Sentiment"),
+    ("news_report",           "News"),
+    ("fundamentals_report",   "Fundamentals"),
+    ("investment_plan",       "Research"),
+    ("trader_investment_plan","Trader"),
+]
 
 _jobs: Dict[str, asyncio.Queue] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -115,6 +131,77 @@ def _run_analysis(request: AnalyzeRequest, emit: Callable[[Any], None]) -> None:
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return HTMLResponse(content=(static_dir / "index.html").read_text())
+
+
+@app.get("/reports", response_class=HTMLResponse)
+async def reports_page():
+    return HTMLResponse(content=(static_dir / "reports.html").read_text())
+
+
+@app.get("/api/reports")
+async def list_reports():
+    """Return all saved reports as [{ticker, date}] sorted newest first."""
+    if not LOGS_DIR.exists():
+        return []
+
+    entries = []
+    for ticker_dir in sorted(LOGS_DIR.iterdir()):
+        if not ticker_dir.is_dir():
+            continue
+        ticker = ticker_dir.name
+
+        # New format: logs/{ticker}/{date}/reports/*.md
+        for date_dir in sorted(ticker_dir.iterdir(), reverse=True):
+            if not date_dir.is_dir() or date_dir.name == "TradingAgentsStrategy_logs":
+                continue
+            if (date_dir / "reports").exists():
+                entries.append({"ticker": ticker, "date": date_dir.name})
+
+        # Legacy format: logs/{ticker}/TradingAgentsStrategy_logs/full_states_log_{date}.json
+        legacy_dir = ticker_dir / "TradingAgentsStrategy_logs"
+        if legacy_dir.exists():
+            for f in sorted(legacy_dir.glob("full_states_log_*.json"), reverse=True):
+                date = f.stem.replace("full_states_log_", "")
+                entries.append({"ticker": ticker, "date": date})
+
+    return entries
+
+
+@app.get("/api/reports/{ticker}/{date}")
+async def get_report(ticker: str, date: str):
+    """Return report content for a given ticker and date."""
+    ticker_dir = LOGS_DIR / ticker
+
+    # New format
+    reports_dir = ticker_dir / date / "reports"
+    if reports_dir.exists():
+        data: Dict[str, str] = {}
+        for key, _ in _REPORT_FIELDS:
+            # try exact key name, then trader_investment_plan variant
+            for stem in (key, key.replace("trader_investment_plan", "trader_investment_decision")):
+                md = reports_dir / f"{stem}.md"
+                if md.exists():
+                    data[key] = md.read_text()
+                    break
+        return data
+
+    # Legacy JSON format
+    legacy = ticker_dir / "TradingAgentsStrategy_logs" / f"full_states_log_{date}.json"
+    if legacy.exists():
+        raw = json.loads(legacy.read_text())
+        return {
+            "final_trade_decision":  raw.get("final_trade_decision") or "",
+            "market_report":         raw.get("market_report") or "",
+            "sentiment_report":      raw.get("sentiment_report") or "",
+            "news_report":           raw.get("news_report") or "",
+            "fundamentals_report":   raw.get("fundamentals_report") or "",
+            "investment_plan":       raw.get("investment_plan") or "",
+            # legacy key name differs
+            "trader_investment_plan": raw.get("trader_investment_plan")
+                                   or raw.get("trader_investment_decision") or "",
+        }
+
+    raise HTTPException(status_code=404, detail="Report not found")
 
 
 @app.post("/api/analyze")

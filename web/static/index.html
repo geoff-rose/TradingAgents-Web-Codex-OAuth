@@ -306,8 +306,12 @@
 <body>
 
 <header>
-  <div class="logo">TradingAgents</div>
-  <div class="badge">Codex OAuth</div>
+  <a class="logo" href="/" style="text-decoration:none;color:inherit">TradingAgents</a>
+  <nav style="display:flex;gap:4px">
+    <a href="/" style="font-size:13px;color:#e8e8f0;text-decoration:none;padding:5px 11px;border-radius:6px;background:var(--surface2)">Run Analysis</a>
+    <a href="/reports" style="font-size:13px;color:#666;text-decoration:none;padding:5px 11px;border-radius:6px;transition:background 0.12s,color 0.12s" onmouseover="this.style.background='var(--surface2)';this.style.color='var(--text)'" onmouseout="this.style.background='';this.style.color='#666'">Reports</a>
+  </nav>
+  <div class="badge" style="margin-left:auto">Codex OAuth</div>
 </header>
 
 <div class="layout">
