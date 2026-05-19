@@ -79,30 +79,45 @@ def get_news_yfinance(
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-        news_str = ""
-        filtered_count = 0
+        def _format_article(data: dict) -> str:
+            date_str = data["pub_date"].strftime("%Y-%m-%d") if data["pub_date"] else "unknown date"
+            s = f"### {data['title']} (source: {data['publisher']}, {date_str})\n"
+            if data["summary"]:
+                s += f"{data['summary']}\n"
+            if data["link"]:
+                s += f"Link: {data['link']}\n"
+            return s + "\n"
 
+        # First pass: articles within the requested date window
+        in_window = []
+        recent_fallback = []
         for article in news:
             data = _extract_article_data(article)
-
-            # Filter by date if publish time is available
             if data["pub_date"]:
                 pub_date_naive = data["pub_date"].replace(tzinfo=None)
-                if not (start_dt <= pub_date_naive <= end_dt + relativedelta(days=1)):
-                    continue
+                if start_dt <= pub_date_naive <= end_dt + relativedelta(days=1):
+                    in_window.append(data)
+                else:
+                    recent_fallback.append(data)
+            else:
+                in_window.append(data)  # no date — include by default
 
-            news_str += f"### {data['title']} (source: {data['publisher']})\n"
-            if data["summary"]:
-                news_str += f"{data['summary']}\n"
-            if data["link"]:
-                news_str += f"Link: {data['link']}\n"
-            news_str += "\n"
-            filtered_count += 1
+        if in_window:
+            news_str = "".join(_format_article(d) for d in in_window)
+            return f"## {ticker} News, from {start_date} to {end_date}:\n\n{news_str}"
 
-        if filtered_count == 0:
-            return f"No news found for {ticker} between {start_date} and {end_date}"
+        # Nothing in the window — fall back to most recent articles with a clear note.
+        # This prevents the news analyst receiving an empty block when significant
+        # events (earnings, recalls, guidance updates) occurred just outside the window.
+        if recent_fallback:
+            news_str = "".join(_format_article(d) for d in recent_fallback)
+            return (
+                f"## {ticker} News (no articles in {start_date}–{end_date}; "
+                f"showing {len(recent_fallback)} most recent articles outside that window):\n\n"
+                + news_str
+            )
 
-        return f"## {ticker} News, from {start_date} to {end_date}:\n\n{news_str}"
+        return f"No news found for {ticker}"
 
     except Exception as e:
         return f"Error fetching news for {ticker}: {str(e)}"
