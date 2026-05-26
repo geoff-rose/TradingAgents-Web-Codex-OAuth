@@ -11,8 +11,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Type
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -21,6 +22,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from openai import OpenAI
+from pydantic import BaseModel
 
 from .base_client import BaseLLMClient
 
@@ -146,6 +148,83 @@ def _convert_tools(tools: Optional[Iterable[Any]]) -> Optional[List[Dict[str, An
     return converted or None
 
 
+def _extract_json(text: str) -> str:
+    """Strip markdown code fences and return the outermost JSON object."""
+    text = text.strip()
+    # Strip ```json ... ``` or ``` ... ``` fences
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+    text = re.sub(r"\s*```\s*$", "", text)
+    text = text.strip()
+    # Walk from the first '{' to its matching '}' so we capture the whole object
+    start = text.find("{")
+    if start == -1:
+        return text
+    depth = 0
+    for i, ch in enumerate(text[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return text[start:]
+
+
+class _StructuredOutputWrapper:
+    """Wraps CodexChatModel to produce a parsed Pydantic instance.
+
+    Injects a compact JSON-output instruction into the system message so the
+    model returns a JSON object, then parses and validates it into ``schema``.
+    """
+
+    def __init__(self, llm: "CodexChatModel", schema: Type[BaseModel]) -> None:
+        self._llm = llm
+        self._schema = schema
+        # Build a compact schema description: field name → type hint + description
+        field_descs = []
+        for name, f in schema.model_fields.items():
+            ann = f.annotation.__name__ if hasattr(f.annotation, "__name__") else str(f.annotation)
+            desc = ""
+            if f.description:
+                # Keep just the first sentence so the instruction stays concise
+                first = f.description.split(". ")[0].strip()
+                desc = f" — {first}"
+            field_descs.append(f'"{name}" ({ann}){desc}')
+        schema_hint = "; ".join(field_descs)
+        self._instruction = (
+            f"\n\nRespond ONLY with a valid JSON object. Required keys:\n{schema_hint}\n"
+            "Output nothing except the JSON object — no markdown fences, no explanations."
+        )
+
+    def invoke(self, messages: List[BaseMessage], **kwargs: Any) -> BaseModel:
+        modified = self._inject_instruction(messages)
+        result = self._llm.invoke(modified, **kwargs)
+        text = _extract_json(result.content)
+        data = json.loads(text)
+        # model_validate allows extra fields; strict=False lets int/str coercion work
+        return self._schema.model_validate(data)
+
+    def _inject_instruction(self, messages) -> List[BaseMessage]:
+        """Append the JSON instruction to the system message (or the last human message)."""
+        # Plain string prompt (common from agent factories) — wrap it properly
+        if isinstance(messages, str):
+            return [
+                SystemMessage(content=self._instruction.strip()),
+                HumanMessage(content=messages),
+            ]
+        # PromptValue (e.g. ChatPromptTemplate output)
+        if hasattr(messages, "to_messages"):
+            messages = messages.to_messages()
+        out = list(messages)
+        for i, msg in enumerate(out):
+            if isinstance(msg, SystemMessage):
+                out[i] = SystemMessage(content=str(msg.content) + self._instruction)
+                return out
+        # No system message — prepend one
+        out.insert(0, SystemMessage(content=self._instruction.strip()))
+        return out
+
+
 class CodexChatModel(BaseChatModel):
     model_name: str
     base_url: str = _CODEX_BASE_URL
@@ -169,8 +248,15 @@ class CodexChatModel(BaseChatModel):
     ) -> "CodexChatModel":
         return self.model_copy(update={"tools": _convert_tools(tools)})
 
-    def with_structured_output(self, schema: Any, *, method: Optional[str] = None, **kwargs: Any) -> Any:
-        raise NotImplementedError("openai-codex structured output is not implemented; free-text fallback will be used")
+    def with_structured_output(self, schema: Any, *, method: Optional[str] = None, **kwargs: Any) -> "_StructuredOutputWrapper":
+        """Return a wrapper that requests JSON from the model and parses it into ``schema``.
+
+        The Codex backend does not support native JSON-schema mode, so we
+        inject a JSON instruction into the system message and extract the
+        response with a lightweight parser.  This gives the same Pydantic
+        instance that callers expect from any other provider.
+        """
+        return _StructuredOutputWrapper(self, schema)
 
     def _generate(
         self,

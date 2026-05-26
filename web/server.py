@@ -26,6 +26,8 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 # Reports are stored under ~/.tradingagents/logs (respects TRADINGAGENTS_RESULTS_DIR override)
 _HOME = Path.home() / ".tradingagents"
 LOGS_DIR = Path(os.getenv("TRADINGAGENTS_RESULTS_DIR", str(_HOME / "logs")))
+COMPANY_DIR = _HOME / "company_info"
+COMPANY_DIR.mkdir(exist_ok=True)
 
 # Report fields in display order; covers both new (md files) and legacy (JSON keys) formats
 _REPORT_FIELDS = [
@@ -64,7 +66,7 @@ _NODE_TEAMS = {
 class AnalyzeRequest(BaseModel):
     ticker: str
     date: str
-    deep_model: str = "gpt-5.5"
+    deep_model: str = "gpt-5.4"
     quick_model: str = "gpt-5.4-mini"
     research_depth: int = 1
     analysts: List[str] = ["market", "social", "news", "fundamentals"]
@@ -80,8 +82,8 @@ def _run_analysis(request: AnalyzeRequest, emit: Callable[[Any], None]) -> None:
             "llm_provider": "openai-codex",
             "deep_think_llm": request.deep_model,
             "quick_think_llm": request.quick_model,
-            "max_debate_rounds": request.research_depth,
-            "max_risk_discuss_rounds": request.research_depth,
+            "max_debate_rounds": 1,
+            "max_risk_discuss_rounds": 1,
         }
 
         emit({"type": "status", "message": f"Initialising agents for {request.ticker.upper()}…"})
@@ -202,6 +204,16 @@ async def get_report(ticker: str, date: str):
         }
 
     raise HTTPException(status_code=404, detail="Report not found")
+
+
+@app.get("/api/company/{code}")
+async def get_company(code: str):
+    """Return cached company info for a ticker code (e.g. BHP, not BHP.AX)."""
+    code = code.upper().replace(".AX", "")
+    path = COMPANY_DIR / f"{code}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No cached company data")
+    return json.loads(path.read_text())
 
 
 @app.post("/api/analyze")

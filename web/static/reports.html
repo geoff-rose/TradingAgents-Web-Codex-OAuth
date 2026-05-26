@@ -157,33 +157,82 @@
   .report-title { font-size: 18px; font-weight: 700; }
   .report-date  { font-size: 12px; color: var(--muted); }
 
-  /* Tab bar */
-  .tab-bar {
+  /* Team bar (top-level pill buttons) */
+  .team-bar {
     display: none;
     flex-shrink: 0;
-    padding: 12px 24px 0;
-    border-bottom: 1px solid var(--border);
-    gap: 2px;
-    overflow-x: auto;
+    padding: 16px 24px 0;
+    gap: 8px;
+    flex-wrap: wrap;
   }
-  .tab-bar.visible { display: flex; }
-  .tab-bar::-webkit-scrollbar { height: 0; }
+  .team-bar.visible { display: flex; }
 
-  .tab-btn {
-    padding: 7px 14px;
+  .team-btn {
+    padding: 7px 18px;
     font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+  }
+  /* Per-team colours */
+  .team-btn[data-team="decision"]:hover  { color: #2dd4bf; border-color: rgba(20,184,166,0.4); }
+  .team-btn[data-team="decision"].active { color: #2dd4bf; background: rgba(20,184,166,0.12); border-color: rgba(20,184,166,0.5); }
+
+  .team-btn[data-team="analyst"]:hover   { color: #818cf8; border-color: rgba(99,102,241,0.4); }
+  .team-btn[data-team="analyst"].active  { color: #818cf8; background: rgba(99,102,241,0.12); border-color: rgba(99,102,241,0.5); }
+
+  .team-btn[data-team="research"]:hover  { color: #4ade80; border-color: rgba(74,222,128,0.4); }
+  .team-btn[data-team="research"].active { color: #4ade80; background: rgba(74,222,128,0.12); border-color: rgba(74,222,128,0.5); }
+
+  .team-btn[data-team="trading"]:hover   { color: #fb923c; border-color: rgba(251,146,60,0.4); }
+  .team-btn[data-team="trading"].active  { color: #fb923c; background: rgba(251,146,60,0.12); border-color: rgba(251,146,60,0.5); }
+
+  /* Sub bar (report buttons within a team) */
+  .sub-bar {
+    display: none;
+    flex-shrink: 0;
+    padding: 10px 24px 12px;
+    border-bottom: 1px solid var(--border);
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .sub-bar.visible { display: flex; }
+
+  .sub-btn {
+    padding: 5px 14px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--muted);
     background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
+    border: 1px solid var(--border);
+    border-radius: 14px;
     cursor: pointer;
     white-space: nowrap;
-    transition: color 0.12s, border-color 0.12s;
-    margin-bottom: -1px;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
   }
-  .tab-btn:hover { color: var(--text); }
-  .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+  /* Per-report sub-button colours */
+  .sub-btn[data-key="market_report"]:hover        { color: #60a5fa; border-color: rgba(96,165,250,0.4); }
+  .sub-btn[data-key="market_report"].active       { color: #60a5fa; background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.45); }
+
+  .sub-btn[data-key="sentiment_report"]:hover     { color: #f472b6; border-color: rgba(244,114,182,0.4); }
+  .sub-btn[data-key="sentiment_report"].active    { color: #f472b6; background: rgba(244,114,182,0.1); border-color: rgba(244,114,182,0.45); }
+
+  .sub-btn[data-key="news_report"]:hover          { color: #fbbf24; border-color: rgba(251,191,36,0.4); }
+  .sub-btn[data-key="news_report"].active         { color: #fbbf24; background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.45); }
+
+  .sub-btn[data-key="fundamentals_report"]:hover  { color: #34d399; border-color: rgba(52,211,153,0.4); }
+  .sub-btn[data-key="fundamentals_report"].active { color: #34d399; background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.45); }
+
+  .sub-btn[data-key="investment_plan"]:hover      { color: #a78bfa; border-color: rgba(167,139,250,0.4); }
+  .sub-btn[data-key="investment_plan"].active     { color: #a78bfa; background: rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.45); }
+
+  .sub-btn[data-key="trader_investment_plan"]:hover  { color: #fb923c; border-color: rgba(251,146,60,0.4); }
+  .sub-btn[data-key="trader_investment_plan"].active { color: #fb923c; background: rgba(251,146,60,0.1); border-color: rgba(251,146,60,0.45); }
 
   /* Tab panels wrapper — must fill remaining viewer height */
   #tab-panels {
@@ -214,6 +263,46 @@
   .decision-panel.SELL { background: #1f0d0d; border-color: #4a1a1a; }
   .decision-panel.HOLD { background: #1a1608; border-color: #4a3a10; }
   .decision-panel.UNKNOWN { background: var(--surface); border-color: var(--border); }
+
+  /* ── Scorecard visual component ── */
+  .sc-wrap { animation: fadeIn 0.2s ease; }
+
+  .sc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 22px;
+    border-radius: 10px;
+    border: 1px solid;
+    margin-bottom: 22px;
+  }
+  .sc-rating { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .sc-thresholds { font-size: 11px; color: #555; margin-top: 2px; }
+
+  /* Overall score: large ring */
+  .sc-total-ring { flex-shrink: 0; }
+
+  .sc-dims { margin-bottom: 4px; }
+  .sc-dim { padding: 12px 0; border-bottom: 1px solid #18181f; }
+  .sc-dim:last-child { border-bottom: none; }
+
+  /* Dimension row: circle on left, text on right */
+  .sc-dim-row { display: flex; gap: 14px; align-items: flex-start; }
+  .sc-dim-ring { flex-shrink: 0; }
+  .sc-dim-text { flex: 1; min-width: 0; padding-top: 4px; }
+  .sc-dim-name   { font-size: 13px; font-weight: 600; color: #ccc; margin-bottom: 5px; }
+  .sc-dim-reason { font-size: 12px; color: #777; line-height: 1.55; }
+
+  .sc-thesis { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 12px; }
+  .sc-thesis-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.8px; color: #555; margin-bottom: 10px;
+  }
+  .sc-thesis-body p { font-size: 13px; line-height: 1.75; color: #bbb; margin-bottom: 10px; }
+  .sc-thesis-body p:last-child { margin-bottom: 0; }
+
+  .sc-meta { display: flex; gap: 20px; padding-top: 14px; font-size: 12px; color: #888; flex-wrap: wrap; }
+  .sc-meta strong { color: #aaa; }
 
   /* Markdown styles */
   .md-body h1 { font-size: 22px; font-weight: 700; margin: 20px 0 10px; color: var(--text); }
@@ -287,6 +376,68 @@
   .md-body a { color: var(--accent); text-decoration: none; }
   .md-body a:hover { text-decoration: underline; }
 
+  /* ── Company logo in header ── */
+  #rh-logo {
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    object-fit: contain;
+    background: var(--surface2);
+    flex-shrink: 0;
+    display: none;
+  }
+
+  /* ── Company info panel ── */
+  .co-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .co-logo {
+    width: 56px; height: 56px;
+    border-radius: 10px;
+    object-fit: contain;
+    background: var(--surface2);
+    flex-shrink: 0;
+  }
+  .co-name { font-size: 18px; font-weight: 700; color: var(--text); }
+  .co-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 5px; }
+  .co-chip {
+    font-size: 11px; font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: #aaa;
+  }
+  .co-description {
+    font-size: 13px; line-height: 1.75; color: #bbb;
+    margin-bottom: 18px;
+    border-left: 3px solid var(--border);
+    padding-left: 14px;
+  }
+  .co-website {
+    font-size: 13px; margin-bottom: 22px;
+    color: var(--muted);
+  }
+  .co-website a { color: var(--accent); text-decoration: none; }
+  .co-website a:hover { text-decoration: underline; }
+  .co-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  @media (max-width: 700px) { .co-metrics { grid-template-columns: repeat(2, 1fr); } }
+  .co-metric {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .co-metric-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
+  .co-metric-value { font-size: 17px; font-weight: 700; color: var(--text); }
+
   /* Loading spinner */
   .loading {
     display: flex;
@@ -334,6 +485,7 @@
     </div>
 
     <div class="report-header" id="report-header">
+      <img id="rh-logo" alt="">
       <div id="rh-badge-wrap">
         <span class="report-badge" id="rh-badge">—</span>
       </div>
@@ -343,7 +495,8 @@
       </div>
     </div>
 
-    <div class="tab-bar" id="tab-bar"></div>
+    <div class="team-bar" id="team-bar"></div>
+    <div class="sub-bar"  id="sub-bar"></div>
 
     <div id="tab-panels"></div>
 
@@ -352,14 +505,34 @@
 
 <script>
   // ── Config ──────────────────────────────────────────────────────────
-  const TABS = [
-    { key: 'final_trade_decision',  label: '🎯 Decision' },
-    { key: 'market_report',         label: '📊 Market' },
-    { key: 'sentiment_report',      label: '💬 Sentiment' },
-    { key: 'news_report',           label: '📰 News' },
-    { key: 'fundamentals_report',   label: '📋 Fundamentals' },
-    { key: 'investment_plan',       label: '🧠 Research' },
-    { key: 'trader_investment_plan',label: '💼 Trader' },
+  const TEAMS = [
+    {
+      key: 'decision', label: 'Decision',
+      reports: [
+        { key: 'final_trade_decision', label: 'Decision' },
+      ],
+    },
+    {
+      key: 'analyst', label: 'Analyst Team',
+      reports: [
+        { key: 'market_report',       label: 'Market' },
+        { key: 'sentiment_report',    label: 'Sentiment' },
+        { key: 'news_report',         label: 'News' },
+        { key: 'fundamentals_report', label: 'Fundamentals' },
+      ],
+    },
+    {
+      key: 'research', label: 'Research Team',
+      reports: [
+        { key: 'investment_plan', label: 'Investment Plan' },
+      ],
+    },
+    {
+      key: 'trading', label: 'Trading Team',
+      reports: [
+        { key: 'trader_investment_plan', label: 'Trader Plan' },
+      ],
+    },
   ];
 
   // ── Signal detection ────────────────────────────────────────────────
@@ -405,6 +578,193 @@
     if (r === 'strong buy'  || r === 'overweight' || r === 'buy')  return { signal: 'BUY',  label };
     if (r === 'strong sell' || r === 'underweight' || r === 'sell') return { signal: 'SELL', label };
     return { signal: 'HOLD', label };
+  }
+
+  function escHtml(s) {
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Scorecard parser — format-agnostic, handles all variants across 300 tickers ──
+  function parseScorecard(text) {
+    // Quick bail: must look like a scorecard at all
+    if (!/scorecard|\/\s*100/i.test(text)) return null;
+
+    // ── Format A: new structured "## Rating: **X** (Score: N/100)" ────────
+    const newFmt = text.match(/##\s+Rating:\s+\*\*([^*]+)\*\*\s+\(Score:\s+(\d+)\/100\)/);
+    if (newFmt) {
+      const rating = newFmt[1].trim();
+      const total  = parseInt(newFmt[2]);
+      const dims   = [];
+      const rowRe  = /\|\s+([^|*\-]{2,}?)\s+\|\s+(\d+)\s+\|\s+(\d+)\s+\|\s*([^|]*?)\s*\|/g;
+      let m;
+      while ((m = rowRe.exec(text)) !== null) {
+        const name = m[1].trim();
+        if (/^[-=]/.test(name) || /dimension/i.test(name) || /^\*\*total/i.test(name)) continue;
+        dims.push({ name, score: parseInt(m[2]), max: parseInt(m[3]), reasoning: m[4].trim() });
+      }
+      if (!dims.length) return null;
+      const thesisM = text.match(/###\s+Investment Thesis\s*\n+([\s\S]+?)(?:\n\n\*\*(?:Price Target|Time Horizon)|$)/);
+      const ptM = text.match(/\*\*Price Target\*\*:\s*(.+)/);
+      const thM = text.match(/\*\*Time Horizon\*\*:\s*(.+)/);
+      return { rating, total, dims,
+        thesis: (thesisM?.[1] || '').trim(),
+        priceTarget: ptM?.[1]?.trim(), timeHorizon: thM?.[1]?.trim() };
+    }
+
+    // ── Formats B/C/D: flexible extraction ───────────────────────────────
+    // Helper: derive rating from total score using standard thresholds
+    function ratingFromTotal(n) {
+      return n >= 70 ? 'Buy' : n >= 55 ? 'Overweight' : n >= 38 ? 'Hold' : n >= 22 ? 'Underweight' : 'Sell';
+    }
+
+    // ── Step 1: Collect dimension rows ────────────────────────────────────
+    // Pattern A (bold dim name): | **name** | **N / max** | reasoning |
+    let rowMatches = [...text.matchAll(
+      /\|\s+\*\*([^|*]+?)\*\*\s+\|\s+\*\*(\d+)\s*\/\s*(\d+)\*\*\s+\|([^|]*)\|/g
+    )];
+    // Pattern B (non-bold dim name): | Technical Trend | **N / max** | reasoning |
+    if (!rowMatches.length) {
+      rowMatches = [...text.matchAll(
+        /\|\s+([A-Za-z][^|`\n]{1,50}?)\s*\|\s+\*{0,2}(\d+)\s*\/\s*(\d+)\*{0,2}\s*\|([^|]*)\|/g
+      )].filter(m => !/(Dimension|Score|Rationale|Reasoning|Max|-{3})/i.test(m[1]));
+    }
+
+    // ── Step 2: Heading-per-dim fallback ─────────────────────────────────
+    // Supports ## or ### prefix, ) or . separator; also bold-inline "**N) Name: score/max**"
+    const dimBlocks = rowMatches.length ? [] : (() => {
+      const hd = [...text.matchAll(
+        /^#{2,3}\s+\d+[.)]\s+([^:`*\n]+?):\s*\*\*(\d+)\s*\/\s*(\d+)\*\*([\s\S]*?)(?=\n#{2,3}\s|\n#\s|$)/gm
+      )];
+      if (hd.length) return hd;
+      // "**N) Name: score / max**\n  body..." (bold-line format, no heading marker)
+      return [...text.matchAll(
+        /^\*\*\d+[.)]\s+([^:*\n]+?):\s*(\d+)\s*\/\s*(\d+)\*\*([\s\S]*?)(?=\n\*\*\d+[.)]|\n#{1,3}\s|$)/gm
+      )];
+    })();
+
+    // ── Step 3: Total score — explicit line or computed from dims ─────────
+    const totalM =
+      text.match(/Total Score[^0-9\n]{0,30}(\d+)\s*\/\s*100/i) ||
+      text.match(/Total Score\s*\n\s*\*{0,2}(\d+)\s*\/\s*100/i) ||
+      text.match(/Score:\s*\*{0,2}(\d+)\s*\/\s*100/i);
+
+    let total;
+    if (totalM) {
+      total = parseInt(totalM[1]);
+    } else if (rowMatches.length) {
+      total = rowMatches.reduce((s, m) => s + parseInt(m[2]), 0);
+    } else if (dimBlocks.length) {
+      total = dimBlocks.reduce((s, m) => s + parseInt(m[2]), 0);
+    } else {
+      return null;
+    }
+
+    // ── Step 4: Rating — explicit or derived from total ───────────────────
+    const RATINGS = 'Strong Buy|Strong Sell|Overweight|Underweight|Hold|Buy|Sell';
+    const ratingM =
+      text.match(new RegExp(`(?:Rating|Decision)[:\\s*]{0,15}(${RATINGS})`, 'i')) ||
+      text.match(new RegExp(`(?:Rating|Decision)\\s*\\n\\s*\\*{0,2}(${RATINGS})`, 'i'));
+    const rating = ratingM ? ratingM[1].trim() : ratingFromTotal(total);
+
+    // ── Step 5: Build dims array ──────────────────────────────────────────
+    const thesisM = text.match(/(?:Concise\s+)?Investment [Tt]hesis\s*\n+([\s\S]+?)(?=\n##|\n#\s|$)/i);
+
+    if (rowMatches.length) {
+      const dims = rowMatches.map(m => ({
+        name: m[1].trim().replace(/^\d+\.\s*/, ''),
+        score: parseInt(m[2]), max: parseInt(m[3]), reasoning: m[4].trim()
+      }));
+      return { rating, total, dims, thesis: (thesisM?.[1] || '').trim() };
+    }
+
+    if (dimBlocks.length) {
+      const dims = dimBlocks.map(m => ({
+        name: m[1].trim(), score: parseInt(m[2]), max: parseInt(m[3]),
+        reasoning: m[4].replace(/\*\*/g, '').replace(/^[-•]\s*/gm, '')
+                       .replace(/\n+/g, ' ').trim().slice(0, 220)
+      }));
+      return { rating, total, dims, thesis: (thesisM?.[1] || '').trim() };
+    }
+
+    return null;
+  }
+
+  // ── Scorecard renderer ───────────────────────────────────────────────
+  function ringColor(pct) {
+    if (pct >= 0.75) return '#22c55e';
+    if (pct >= 0.55) return '#3b82f6';
+    if (pct >= 0.38) return '#f59e0b';
+    return '#ef4444';
+  }
+
+  function makeRing(score, max, size, strokeW, fontSize) {
+    const r    = (size - strokeW) / 2;
+    const circ = 2 * Math.PI * r;
+    const pct  = score / max;
+    const fill = pct * circ;
+    const gap  = circ - fill;
+    const color = ringColor(pct);
+    const label = Math.round(pct * 100) + '%';
+    return `<svg class="sc-dim-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#1a1a22" stroke-width="${strokeW}"/>
+      <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="${strokeW}"
+        stroke-dasharray="${fill.toFixed(2)} ${gap.toFixed(2)}" stroke-linecap="round"
+        transform="rotate(-90 ${size/2} ${size/2})"/>
+      <text x="${size/2}" y="${size/2}" text-anchor="middle" dominant-baseline="middle"
+        font-size="${fontSize * 0.85}" font-weight="800" fill="${color}" font-family="Inter,system-ui,sans-serif">${label}</text>
+    </svg>`;
+  }
+
+  function renderScorecard(sc, signal) {
+    const palette = {
+      BUY:     { text: '#22c55e', bg: 'rgba(34,197,94,0.08)',    border: 'rgba(34,197,94,0.25)' },
+      SELL:    { text: '#ef4444', bg: 'rgba(239,68,68,0.08)',     border: 'rgba(239,68,68,0.25)' },
+      HOLD:    { text: '#f59e0b', bg: 'rgba(245,158,11,0.08)',    border: 'rgba(245,158,11,0.25)' },
+      UNKNOWN: { text: '#888',   bg: 'rgba(128,128,128,0.05)',   border: 'rgba(128,128,128,0.2)' },
+    };
+    const rc = palette[signal] || palette.UNKNOWN;
+
+    let html = '<div class="sc-wrap">';
+    html += `
+      <div class="sc-header" style="border-color:${rc.border};background:${rc.bg}">
+        <div>
+          <div class="sc-rating" style="color:${rc.text}">${escHtml(sc.rating)}</div>
+          <div class="sc-thresholds">Buy ≥70 &middot; Overweight ≥55 &middot; Hold ≥38 &middot; Underweight ≥22 &middot; Sell &lt;22</div>
+        </div>
+        <div class="sc-total-ring">${makeRing(sc.total, 100, 90, 7, 22)}</div>
+      </div>`;
+
+    html += '<div class="sc-dims">';
+    for (const dim of sc.dims) {
+      const pct = dim.score / dim.max;
+      html += `
+        <div class="sc-dim">
+          <div class="sc-dim-row">
+            ${makeRing(dim.score, dim.max, 56, 5, 13)}
+            <div class="sc-dim-text">
+              <div class="sc-dim-name">${escHtml(dim.name)}<span style="font-size:11px;color:#555;font-weight:400"> /${dim.max}</span></div>
+              ${dim.reasoning ? `<div class="sc-dim-reason">${escHtml(dim.reasoning)}</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }
+    html += '</div>';
+
+    if (sc.thesis) {
+      html += `
+        <div class="sc-thesis">
+          <div class="sc-thesis-label">Investment Thesis</div>
+          <div class="sc-thesis-body">${marked.parse(sc.thesis)}</div>
+        </div>`;
+    }
+    if (sc.priceTarget || sc.timeHorizon) {
+      html += '<div class="sc-meta">';
+      if (sc.priceTarget) html += `<span><strong>Price Target:</strong> ${escHtml(sc.priceTarget)}</span>`;
+      if (sc.timeHorizon) html += `<span><strong>Time Horizon:</strong> ${escHtml(sc.timeHorizon)}</span>`;
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
   }
 
   // ── Sidebar ─────────────────────────────────────────────────────────
@@ -462,94 +822,209 @@
     }
   }
 
+  // ── Company info renderer ────────────────────────────────────────────
+  function fmtMktCap(v) {
+    if (!v) return '—';
+    if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+    return '$' + v.toLocaleString();
+  }
+  function fmtNum(v, decimals = 2, suffix = '') {
+    if (v == null) return '—';
+    return v.toFixed(decimals) + suffix;
+  }
+
+  function renderCompanyPanel(co) {
+    const f = co.fundamentals || {};
+    const metrics = [
+      { label: 'Market Cap',    value: fmtMktCap(co.market_cap) },
+      { label: 'PE Ratio',      value: fmtNum(f.pe_ratio) },
+      { label: '52W High',      value: f['52_week_high'] != null ? '$' + f['52_week_high'].toFixed(2) : '—' },
+      { label: '52W Low',       value: f['52_week_low']  != null ? '$' + f['52_week_low'].toFixed(2)  : '—' },
+      { label: 'EPS',           value: f.eps != null ? '$' + f.eps.toFixed(2) : '—' },
+      { label: 'Beta',          value: fmtNum(f.beta) },
+      { label: 'ROE',           value: fmtNum(f.roe, 2, '%') },
+      { label: 'Dividend Yield',value: f.dividend_yield != null ? fmtNum(f.dividend_yield, 2, '%') : '—' },
+    ];
+
+    let html = '<div style="animation:fadeIn 0.15s ease">';
+
+    html += '<div class="co-header">';
+    if (co.logo_data) html += `<img class="co-logo" src="${escHtml(co.logo_data)}" alt="">`;
+    html += `<div>
+      <div class="co-name">${escHtml(co.name || '')}</div>
+      <div class="co-chips">
+        ${co.sector   ? `<span class="co-chip">${escHtml(co.sector)}</span>` : ''}
+        ${co.industry ? `<span class="co-chip">${escHtml(co.industry)}</span>` : ''}
+      </div>
+    </div></div>`;
+
+    if (f.description) {
+      html += `<p class="co-description">${escHtml(f.description)}</p>`;
+    }
+    if (f.website) {
+      html += `<div class="co-website">🌐 <a href="${escHtml(f.website)}" target="_blank" rel="noopener">${escHtml(f.website)}</a></div>`;
+    }
+
+    html += '<div class="co-metrics">';
+    for (const m of metrics) {
+      html += `<div class="co-metric"><div class="co-metric-label">${escHtml(m.label)}</div><div class="co-metric-value">${escHtml(m.value)}</div></div>`;
+    }
+    html += '</div></div>';
+    return html;
+  }
+
   // ── Report loader ────────────────────────────────────────────────────
   async function loadReport(ticker, date, itemEl) {
-    // Highlight active item
     document.querySelectorAll('.date-item').forEach(el => el.classList.remove('active'));
     itemEl.classList.add('active');
 
-    // Show loading state
     document.getElementById('placeholder').style.display = 'none';
-    const tabBar    = document.getElementById('tab-bar');
+    const teamBar   = document.getElementById('team-bar');
+    const subBar    = document.getElementById('sub-bar');
     const tabPanels = document.getElementById('tab-panels');
     const rhHeader  = document.getElementById('report-header');
-    tabBar.innerHTML    = '<div class="loading" style="padding:12px 0"><div class="spinner"></div></div>';
-    tabPanels.innerHTML = '';
-    tabBar.classList.add('visible');
-    rhHeader.classList.remove('visible');
+    const rhLogo    = document.getElementById('rh-logo');
 
-    // Fetch report data
-    let data;
+    teamBar.classList.remove('visible');
+    subBar.classList.remove('visible');
+    teamBar.innerHTML = '<div class="loading" style="padding:4px 0"><div class="spinner"></div></div>';
+    tabPanels.innerHTML = '';
+    rhHeader.classList.remove('visible');
+    rhLogo.style.display = 'none';
+
+    // Strip .AX for ASX Short API
+    const code = ticker.replace(/\.AX$/i, '');
+
+    let data, coData = null;
     try {
-      const res = await fetch(`/api/reports/${encodeURIComponent(ticker)}/${encodeURIComponent(date)}`);
-      if (!res.ok) throw new Error(await res.text());
-      data = await res.json();
+      const [rRes, coRes] = await Promise.all([
+        fetch(`/api/reports/${encodeURIComponent(ticker)}/${encodeURIComponent(date)}`),
+        fetch(`/api/company/${code}`).catch(() => null),
+      ]);
+      if (!rRes.ok) throw new Error(await rRes.text());
+      data = await rRes.json();
+      if (coRes?.ok) coData = await coRes.json().catch(() => null);
     } catch (e) {
-      tabBar.innerHTML = `<div style="padding:12px 24px;color:#ef4444;font-size:13px">Failed to load: ${e.message}</div>`;
+      teamBar.innerHTML = `<div style="padding:12px 24px;color:#ef4444;font-size:13px">Failed to load: ${e.message}</div>`;
+      teamBar.classList.add('visible');
       return;
     }
 
-    // Render header
+    // Header badge + logo
     const { signal, label } = parseDecision(data.final_trade_decision || '');
-    const badgeWrap = document.getElementById('rh-badge-wrap');
-    badgeWrap.className = signal;
-    document.getElementById('rh-badge').textContent  = label;
-    document.getElementById('rh-title').textContent  = ticker;
-    document.getElementById('rh-date').textContent   = date;
+    document.getElementById('rh-badge-wrap').className = signal;
+    document.getElementById('rh-badge').textContent = label;
+    document.getElementById('rh-title').textContent = ticker;
+    document.getElementById('rh-date').textContent  = date;
+    if (coData?.logo_data) {
+      rhLogo.src = coData.logo_data;
+      rhLogo.style.display = 'block';
+    }
     rhHeader.classList.add('visible');
 
-    // Build tabs (only for fields that have content)
-    const activeTabs = TABS.filter(t => (data[t.key] || '').trim());
-    tabBar.innerHTML = '';
+    // Build all report panels upfront (hidden)
     tabPanels.innerHTML = '';
-
-    activeTabs.forEach((tab, i) => {
-      // Tab button
-      const btn = document.createElement('button');
-      btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
-      btn.textContent = tab.label;
-      btn.onclick = () => switchTab(tab.key);
-      tabBar.appendChild(btn);
-
-      // Tab panel
-      const panel = document.createElement('div');
-      panel.className = 'tab-content' + (i === 0 ? ' active' : '');
-      panel.id = `panel-${tab.key}`;
-
-      const content = data[tab.key] || '';
-
-      if (tab.key === 'final_trade_decision') {
-        // Decision tab: coloured panel + rendered markdown
-        const dp = document.createElement('div');
-        dp.className = `decision-panel ${signal}`;
-        dp.innerHTML = `<div class="md-body">${marked.parse(content)}</div>`;
-        panel.appendChild(dp);
-      } else {
-        panel.innerHTML = `<div class="md-body" style="animation:fadeIn 0.15s ease">${marked.parse(content)}</div>`;
+    for (const team of TEAMS) {
+      for (const report of team.reports) {
+        const content = (data[report.key] || '').trim();
+        const panel = document.createElement('div');
+        panel.className = 'tab-content';
+        panel.id = `panel-${report.key}`;
+        if (report.key === 'final_trade_decision') {
+          const sc = parseScorecard(content);
+          panel.innerHTML = sc
+            ? renderScorecard(sc, signal)
+            : `<div class="decision-panel ${signal}"><div class="md-body">${marked.parse(content || '')}</div></div>`;
+        } else {
+          panel.innerHTML = `<div class="md-body" style="animation:fadeIn 0.15s ease">${marked.parse(content || '')}</div>`;
+        }
+        tabPanels.appendChild(panel);
       }
+    }
 
-      tabPanels.appendChild(panel);
+    // Add company info panel if data available
+    if (coData) {
+      const coPanel = document.createElement('div');
+      coPanel.className = 'tab-content';
+      coPanel.id = 'panel-company_info';
+      coPanel.innerHTML = renderCompanyPanel(coData);
+      tabPanels.appendChild(coPanel);
+    }
+
+    // Build team bar — company tab first, then report teams that have content
+    teamBar.innerHTML = '';
+    const availableTeams = TEAMS.filter(t => t.reports.some(r => (data[r.key] || '').trim()));
+
+    const coTeam = coData ? [{ key: 'company', label: 'Company', reports: [{ key: 'company_info', label: 'Company Info' }] }] : [];
+    const allTeams = [...coTeam, ...availableTeams];
+
+    allTeams.forEach(team => {
+      const btn = document.createElement('button');
+      btn.className = 'team-btn';
+      btn.textContent = team.label;
+      btn.dataset.team = team.key;
+      btn.onclick = () => selectTeam(team.key, data, signal);
+      teamBar.appendChild(btn);
     });
 
-    if (!activeTabs.length) {
-      tabBar.innerHTML = '<div style="padding:12px 24px;color:#555;font-size:13px">No content in this report.</div>';
+    // Add colour style for company tab
+    const style = document.getElementById('co-tab-style') || document.createElement('style');
+    style.id = 'co-tab-style';
+    style.textContent = `.team-btn[data-team="company"]:hover{color:#38bdf8;border-color:rgba(56,189,248,0.4)}.team-btn[data-team="company"].active{color:#38bdf8;background:rgba(56,189,248,0.1);border-color:rgba(56,189,248,0.45)}`;
+    document.head.appendChild(style);
+
+    teamBar.classList.add('visible');
+
+    // Select first available team
+    if (allTeams.length) selectTeam(allTeams[0].key, data, signal);
+  }
+
+  function selectTeam(teamKey, data, signal) {
+    // Highlight team button
+    document.querySelectorAll('.team-btn').forEach(b => b.classList.toggle('active', b.dataset.team === teamKey));
+
+    // Company tab — panel already built, no sub-bar needed
+    if (teamKey === 'company') {
+      document.getElementById('sub-bar').classList.remove('visible');
+      showPanel('company_info');
+      return;
+    }
+
+    const team = TEAMS.find(t => t.key === teamKey);
+    const subBar = document.getElementById('sub-bar');
+    subBar.innerHTML = '';
+
+    const availableReports = team.reports.filter(r => (data[r.key] || '').trim());
+
+    if (availableReports.length <= 1) {
+      // Single report — no sub-bar needed, just show it
+      subBar.classList.remove('visible');
+      if (availableReports.length === 1) showPanel(availableReports[0].key);
+    } else {
+      // Multiple reports — show sub-bar
+      availableReports.forEach((report, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'sub-btn';
+        btn.textContent = report.label;
+        btn.dataset.key = report.key;
+        btn.onclick = () => {
+          document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          showPanel(report.key);
+        };
+        subBar.appendChild(btn);
+      });
+      subBar.classList.add('visible');
+      subBar.querySelector('.sub-btn').classList.add('active');
+      showPanel(availableReports[0].key);
     }
   }
 
-  function switchTab(key) {
-    document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-      const tab = document.querySelectorAll('.tab-btn')[i];
-      btn.classList.toggle('active', btn.textContent === TABS.find(t => t.key === key)?.label);
-    });
+  function showPanel(key) {
     document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
     const panel = document.getElementById(`panel-${key}`);
     if (panel) { panel.classList.add('active'); panel.scrollTop = 0; }
-
-    // Sync button active state properly
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      const matchKey = TABS.find(t => t.label === btn.textContent)?.key;
-      btn.classList.toggle('active', matchKey === key);
-    });
   }
 
   // ── Init ─────────────────────────────────────────────────────────────
