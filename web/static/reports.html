@@ -1029,7 +1029,29 @@
 
   // ── Init ─────────────────────────────────────────────────────────────
   marked.setOptions({ breaks: true, gfm: true });
-  loadSidebar();
+
+  async function loadSidebarAndAutoSelect() {
+    await loadSidebar();
+    // Auto-load a report if URL params are present (e.g. from Run Analysis redirect)
+    const params = new URLSearchParams(window.location.search);
+    const ticker = params.get('ticker');
+    const date   = params.get('date');
+    if (!ticker || !date) return;
+    // Find the matching date-item in the sidebar and click it
+    const item = [...document.querySelectorAll('.date-item')].find(
+      el => el.dataset.ticker === ticker && el.dataset.date === date
+    );
+    if (item) {
+      // Expand its parent group first
+      const grp = item.closest('.ticker-group');
+      grp?.querySelector('.ticker-label')?.classList.add('open');
+      item.closest('.date-list')?.classList.add('open');
+      item.click();
+      item.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  loadSidebarAndAutoSelect();
 </script>
 </body>
 </html>

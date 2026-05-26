@@ -215,7 +215,20 @@
   .decision-card.HOLD { background: #1a1608; border-color: #4a3a10; }
   .decision-card.UNKNOWN { background: var(--surface); border-color: var(--border); }
 
-  .decision-top { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .decision-top { display: flex; align-items: center; gap: 14px; }
+  .view-report-btn {
+    margin-left: auto;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 16px;
+    border-radius: 6px;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+  }
+  .view-report-btn:hover { opacity: 0.85; }
   .decision-badge {
     font-size: 20px;
     font-weight: 800;
@@ -390,9 +403,8 @@
       </div>
     </div>
 
-    <!-- Decision -->
+    <!-- Completion -->
     <div id="sec-decision" class="hidden">
-      <div class="section-label">Decision</div>
       <div class="decision-card" id="decision-card">
         <div class="decision-top">
           <div class="decision-badge" id="decision-badge">—</div>
@@ -400,8 +412,8 @@
             <div class="decision-ticker" id="decision-ticker"></div>
             <div class="decision-date" id="decision-date"></div>
           </div>
+          <a id="view-report-btn" href="#" class="view-report-btn">View Full Report →</a>
         </div>
-        <div class="decision-body" id="decision-body"></div>
       </div>
     </div>
 
@@ -420,25 +432,11 @@
       </table>
     </div>
 
-    <!-- Reports -->
-    <div id="sec-reports" class="hidden">
-      <div class="section-label">Analyst Reports</div>
-      <div class="reports-grid" id="reports-grid"></div>
-    </div>
   </main>
 </div>
 
 <script>
   document.getElementById('inp-date').value = new Date().toISOString().slice(0, 10);
-
-  const REPORT_LABELS = {
-    market_report:           '📊 Market Analysis',
-    sentiment_report:        '💬 Sentiment Analysis',
-    news_report:             '📰 News Analysis',
-    fundamentals_report:     '📋 Fundamentals',
-    investment_plan:         '🧠 Investment Plan',
-    trader_investment_plan:  '💼 Trader Plan',
-  };
 
   // Team display order (collapsed rows share a team label)
   const TEAM_ORDER = ['Analyst Team', 'Research Team', 'Trading Team', 'Risk Management'];
@@ -544,38 +542,17 @@
   function renderDecision(result, ticker, date) {
     const text = result.final_trade_decision || '';
     const { signal, label } = detectSignal(text);
+    const reportUrl = `/reports?ticker=${encodeURIComponent(ticker.toUpperCase())}&date=${encodeURIComponent(date)}`;
 
     el('decision-card').className = `decision-card ${signal}`;
-    el('decision-badge').textContent  = label;
-    el('decision-ticker').textContent = ticker.toUpperCase();
-    el('decision-date').textContent   = date;
-    el('decision-body').innerHTML     = marked.parse(text);
+    el('decision-badge').textContent   = label;
+    el('decision-ticker').textContent  = ticker.toUpperCase();
+    el('decision-date').textContent    = date;
+    el('view-report-btn').href         = reportUrl;
     show('sec-decision');
-  }
 
-  function renderReports(result) {
-    const grid = el('reports-grid');
-    let hasAny = false;
-    for (const [key, label] of Object.entries(REPORT_LABELS)) {
-      const content = (result[key] || '').trim();
-      if (!content) continue;
-      hasAny = true;
-      const card = document.createElement('div');
-      card.className = 'report-card';
-      card.innerHTML = `
-        <div class="report-header" onclick="toggleReport(this)">
-          <span class="report-title">${label}</span>
-          <span class="report-chevron">▼</span>
-        </div>
-        <div class="report-body">${escHtml(content)}</div>`;
-      grid.appendChild(card);
-    }
-    if (hasAny) show('sec-reports');
-  }
-
-  function toggleReport(header) {
-    header.classList.toggle('open');
-    header.nextElementSibling.classList.toggle('open');
+    // Navigate automatically after a brief pause so the user sees the result
+    setTimeout(() => { window.location.href = reportUrl; }, 1800);
   }
 
   function escHtml(s) {
@@ -640,7 +617,6 @@
       } else if (event.type === 'complete') {
         finaliseProgress();
         renderDecision(event.result, ticker, date);
-        renderReports(event.result);
         btn.disabled = false; btn.textContent = 'Analyse';
         source.close();
 
