@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TradingAgents</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -234,12 +235,20 @@
     font-size: 13px;
     line-height: 1.7;
     color: #ccc;
-    white-space: pre-wrap;
-    max-height: 240px;
+    max-height: 340px;
     overflow-y: auto;
   }
   .decision-body::-webkit-scrollbar { width: 3px; }
   .decision-body::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+  .decision-body h2,.decision-body h3 { font-size:13px; font-weight:600; color:#e8e8f0; margin:10px 0 4px; }
+  .decision-body p  { margin: 4px 0; }
+  .decision-body ul,.decision-body ol { margin: 4px 0 4px 18px; }
+  .decision-body li { margin: 2px 0; }
+  .decision-body strong { color: #e8e8f0; }
+  .decision-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+  .decision-body th,.decision-body td { border: 1px solid #2a2a32; padding: 4px 8px; text-align: left; }
+  .decision-body th { background: #1e1e24; color: #e8e8f0; }
+  .decision-body hr { border: none; border-top: 1px solid #2a2a32; margin: 10px 0; }
 
   /* Report cards */
   .reports-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -328,27 +337,23 @@
 
     <div class="field">
       <label>Research Depth</label>
-      <select id="inp-depth">
-        <option value="1">Shallow — quick, few debate rounds</option>
-        <option value="3">Medium — balanced</option>
-        <option value="5">Deep — comprehensive, more debate</option>
+      <select id="inp-depth" disabled>
+        <option value="1">Shallow</option>
       </select>
     </div>
 
     <div class="field">
       <label>Quick Model</label>
       <select id="inp-quick">
-        <option value="gpt-5.4-mini">GPT-5.4 Mini (fast)</option>
-        <option value="gpt-5.5">GPT-5.5</option>
+        <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+        <option value="gpt-5.4">GPT-5.4</option>
       </select>
     </div>
 
     <div class="field">
       <label>Deep Model</label>
       <select id="inp-deep">
-        <option value="gpt-5.5">GPT-5.5</option>
         <option value="gpt-5.4">GPT-5.4</option>
-        <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
       </select>
     </div>
 
@@ -498,24 +503,53 @@
   }
 
   function detectSignal(text) {
-    const t = text.toUpperCase();
-    if (/\bSTRONG\s+SELL\b/.test(t)) return 'SELL';
-    if (/\bSTRONG\s+BUY\b/.test(t))  return 'BUY';
-    if (/\bSELL\b/.test(t)) return 'SELL';
-    if (/\bBUY\b/.test(t))  return 'BUY';
-    if (/\bHOLD\b/.test(t)) return 'HOLD';
-    return 'UNKNOWN';
+    const header = (text || '').slice(0, 1000);
+
+    // 1. Explicit "Rating: SIGNAL" line (most reliable — matches scorecard format)
+    const ratingMatch = header.match(/Rating:\s*\*{0,2}(Strong Buy|Strong Sell|Overweight|Underweight|Hold|Buy|Sell)\b/i);
+    if (ratingMatch) return classify(ratingMatch[1]);
+
+    // 2. Look for signal words inside **bold spans** only (avoids body false positives)
+    const boldRe = /\*\*([^*\n]{1,120})\*\*/g;
+    const signals = [
+      ['strong buy',  'BUY',  'Strong Buy'],
+      ['strong sell', 'SELL', 'Strong Sell'],
+      ['overweight',  'BUY',  'Overweight'],
+      ['underweight', 'SELL', 'Underweight'],
+      ['hold',        'HOLD', 'Hold'],
+      ['buy',         'BUY',  'Buy'],
+      ['sell',        'SELL', 'Sell'],
+    ];
+    let m;
+    while ((m = boldRe.exec(header)) !== null) {
+      const span = m[1].toLowerCase();
+      for (const [kw, signal, label] of signals) {
+        if (!span.includes(kw)) continue;
+        const idx = span.indexOf(kw);
+        if (/\bnot\b/.test(span.slice(0, idx))) continue;
+        return { signal, label };
+      }
+    }
+    return { signal: 'UNKNOWN', label: '—' };
+  }
+
+  function classify(raw) {
+    const r = (raw || '').toLowerCase().trim();
+    const label = raw.charAt(0).toUpperCase() + raw.slice(1);
+    if (r === 'strong buy'  || r === 'overweight' || r === 'buy')  return { signal: 'BUY',  label };
+    if (r === 'strong sell' || r === 'underweight' || r === 'sell') return { signal: 'SELL', label };
+    return { signal: 'HOLD', label };
   }
 
   function renderDecision(result, ticker, date) {
-    const text   = result.final_trade_decision || '';
-    const signal = detectSignal(text);
+    const text = result.final_trade_decision || '';
+    const { signal, label } = detectSignal(text);
 
     el('decision-card').className = `decision-card ${signal}`;
-    el('decision-badge').textContent  = signal === 'UNKNOWN' ? '—' : signal;
+    el('decision-badge').textContent  = label;
     el('decision-ticker').textContent = ticker.toUpperCase();
     el('decision-date').textContent   = date;
-    el('decision-body').textContent   = text;
+    el('decision-body').innerHTML     = marked.parse(text);
     show('sec-decision');
   }
 
@@ -635,6 +669,7 @@
   }
 
   el('inp-ticker').addEventListener('keydown', e => { if (e.key === 'Enter') runAnalysis(); });
+  marked.setOptions({ breaks: true, gfm: true });
 </script>
 </body>
 </html>
