@@ -4,9 +4,11 @@
 
 set -euo pipefail
 
-PEM="/home/geoff/codex/racknerd2gb.pem"
-REMOTE="root@23.95.245.174"
-LOGS_DIR="/home/geoff/.tradingagents/logs/"
+: "${TRADINGAGENTS_SYNC_HOST:?Set TRADINGAGENTS_SYNC_HOST, e.g. user@your-server.example.com}"
+: "${TRADINGAGENTS_SYNC_PEM:?Set TRADINGAGENTS_SYNC_PEM to the path of your SSH private key}"
+PEM="$TRADINGAGENTS_SYNC_PEM"
+REMOTE="$TRADINGAGENTS_SYNC_HOST"
+LOGS_DIR="$HOME/.tradingagents/logs/"
 
 echo "========================================"
 echo "  Weekly sync — $(date)"
@@ -14,10 +16,11 @@ echo "========================================"
 
 echo ""
 echo "Rsyncing reports to prod..."
+REMOTE_PATH="${TRADINGAGENTS_SYNC_REMOTE_PATH:-/root/.tradingagents/logs/}"
 rsync --archive --checksum --human-readable \
     --stats --exclude="*.tmp" --exclude="*.bak" \
     -e "ssh -i ${PEM} -o StrictHostKeyChecking=no" \
-    "${LOGS_DIR}" "${REMOTE}:/root/.tradingagents/logs/"
+    "${LOGS_DIR}" "${REMOTE}:${REMOTE_PATH}"
 
 echo ""
 echo "Triggering DB ingest on prod..."

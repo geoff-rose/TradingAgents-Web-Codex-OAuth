@@ -370,18 +370,21 @@ async def run_sync(request: Request):
     if not _is_authenticated(request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    sync_host = os.environ.get("TRADINGAGENTS_SYNC_HOST")  # e.g. "user@your-server.example.com"
+    sync_pem = os.environ.get("TRADINGAGENTS_SYNC_PEM")  # path to the SSH private key
+    if not sync_host or not sync_pem:
+        raise HTTPException(
+            status_code=500,
+            detail="TRADINGAGENTS_SYNC_HOST and TRADINGAGENTS_SYNC_PEM must both be set "
+                   "in the environment to use sync.",
+        )
+    pem = Path(sync_pem).expanduser()
+    sync_remote_path = os.environ.get("TRADINGAGENTS_SYNC_REMOTE_PATH", "/root/.tradingagents/logs/")
+
     body = await request.json()
     selected: List[str] = body.get("tickers", [])  # empty = all
 
-    pem = next(
-        (p for p in [
-            Path(__file__).parent.parent / "racknerd2gb.pem",
-            Path(__file__).parent.parent.parent / "racknerd2gb.pem",
-            Path.home() / ".ssh" / "racknerd2gb.pem",
-        ] if p.exists()),
-        Path(__file__).parent.parent / "racknerd2gb.pem",
-    )
-    remote = "root@23.95.245.174:/root/.tradingagents/logs/"
+    remote = f"{sync_host}:{sync_remote_path}"
     local = str(LOGS_DIR) + "/"
 
     cmd = [
@@ -420,7 +423,7 @@ async def run_sync(request: Request):
                     "ssh",
                     "-i", str(pem),
                     "-o", "StrictHostKeyChecking=no",
-                    "root@23.95.245.174",
+                    sync_host,
                     "curl -s -X POST http://localhost:7777/api/performance/ingest",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,

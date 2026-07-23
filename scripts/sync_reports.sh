@@ -6,11 +6,12 @@
 
 set -euo pipefail
 
-REMOTE_HOST="23.95.245.174"
-REMOTE_USER="root"
-PEM_FILE="/home/geoff/codex/racknerd2gb.pem"
+: "${TRADINGAGENTS_SYNC_HOST:?Set TRADINGAGENTS_SYNC_HOST, e.g. user@your-server.example.com}"
+: "${TRADINGAGENTS_SYNC_PEM:?Set TRADINGAGENTS_SYNC_PEM to the path of your SSH private key}"
+REMOTE_HOST="${TRADINGAGENTS_SYNC_HOST#*@}"
+PEM_FILE="$TRADINGAGENTS_SYNC_PEM"
 LOCAL_LOGS="$HOME/.tradingagents/logs/"
-REMOTE_LOGS="$REMOTE_USER@$REMOTE_HOST:/root/.tradingagents/logs/"
+REMOTE_LOGS="$TRADINGAGENTS_SYNC_HOST:${TRADINGAGENTS_SYNC_REMOTE_PATH:-/root/.tradingagents/logs/}"
 
 echo "========================================"
 echo "  TradingAgents — Report Sync"
