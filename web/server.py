@@ -12,9 +12,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -29,6 +30,30 @@ LOGS_DIR = Path(os.getenv("TRADINGAGENTS_RESULTS_DIR", str(_HOME / "logs")))
 COMPANY_DIR = _HOME / "company_info"
 COMPANY_DIR.mkdir(exist_ok=True)
 
+# Auth config — must be set in the environment, never hardcoded here
+_SECRET_KEY = os.environ.get("TRADINGAGENTS_WEB_SECRET_KEY")
+_ANALYSIS_PASSWORD = os.environ.get("TRADINGAGENTS_WEB_PASSWORD")
+if not _SECRET_KEY or not _ANALYSIS_PASSWORD:
+    raise RuntimeError(
+        "TRADINGAGENTS_WEB_SECRET_KEY and TRADINGAGENTS_WEB_PASSWORD must both be set "
+        "in the environment before starting the web app."
+    )
+_SESSION_COOKIE = "ta_session"
+_SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
+_signer = URLSafeTimedSerializer(_SECRET_KEY)
+
+
+def _is_authenticated(request: Request) -> bool:
+    token = request.cookies.get(_SESSION_COOKIE)
+    if not token:
+        return False
+    try:
+        _signer.loads(token, max_age=_SESSION_MAX_AGE)
+        return True
+    except (BadSignature, SignatureExpired):
+        return False
+
+
 # Report fields in display order; covers both new (md files) and legacy (JSON keys) formats
 _REPORT_FIELDS = [
     ("final_trade_decision",  "Decision"),
@@ -36,6 +61,7 @@ _REPORT_FIELDS = [
     ("sentiment_report",      "Sentiment"),
     ("news_report",           "News"),
     ("fundamentals_report",   "Fundamentals"),
+    ("short_interest_report", "Short Interest"),
     ("investment_plan",       "Research"),
     ("trader_investment_plan","Trader"),
 ]
@@ -66,10 +92,17 @@ _NODE_TEAMS = {
 class AnalyzeRequest(BaseModel):
     ticker: str
     date: str
+    provider: str = "xai-grok"
     deep_model: str = "gpt-5.4"
     quick_model: str = "gpt-5.4-mini"
     research_depth: int = 1
-    analysts: List[str] = ["market", "social", "news", "fundamentals"]
+    analysts: List[str] = ["market", "social", "news", "fundamentals", "short"]
+
+
+def _normalize_ticker(ticker: str) -> str:
+    """Append .AX if the ticker has no exchange suffix (no dot)."""
+    t = ticker.strip().upper()
+    return t if '.' in t else t + '.AX'
 
 
 def _run_analysis(request: AnalyzeRequest, emit: Callable[[Any], None]) -> None:
@@ -77,16 +110,18 @@ def _run_analysis(request: AnalyzeRequest, emit: Callable[[Any], None]) -> None:
         from tradingagents.default_config import DEFAULT_CONFIG
         from tradingagents.graph.trading_graph import TradingAgentsGraph
 
+        ticker = _normalize_ticker(request.ticker)
+
         config = {
             **DEFAULT_CONFIG,
-            "llm_provider": "openai-codex",
+            "llm_provider": request.provider,
             "deep_think_llm": request.deep_model,
             "quick_think_llm": request.quick_model,
             "max_debate_rounds": 1,
             "max_risk_discuss_rounds": 1,
         }
 
-        emit({"type": "status", "message": f"Initialising agents for {request.ticker.upper()}…"})
+        emit({"type": "status", "message": f"Initialising agents for {ticker}…"})
 
         ta = TradingAgentsGraph(selected_analysts=request.analysts, config=config)
 
@@ -109,7 +144,7 @@ def _run_analysis(request: AnalyzeRequest, emit: Callable[[Any], None]) -> None:
         ta.graph.stream = instrumented_stream
         ta.debug = True  # force the streaming code path in _run_graph
 
-        result, _signal = ta.propagate(request.ticker.upper(), request.date)
+        result, _signal = ta.propagate(ticker, request.date)
 
         emit({
             "type": "complete",
@@ -132,7 +167,49 @@ def _run_analysis(request: AnalyzeRequest, emit: Callable[[Any], None]) -> None:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return HTMLResponse(content=(static_dir / "index.html").read_text())
+    return HTMLResponse(content=(static_dir / "home.html").read_text())
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    if _is_authenticated(request):
+        return RedirectResponse("/analysis", status_code=302)
+    return HTMLResponse(content=(static_dir / "login.html").read_text())
+
+
+@app.post("/api/login")
+async def do_login(password: str = Form(...)):
+    if password != _ANALYSIS_PASSWORD:
+        return RedirectResponse("/login?error=1", status_code=302)
+    token = _signer.dumps("authenticated")
+    response = RedirectResponse("/analysis", status_code=302)
+    response.set_cookie(
+        _SESSION_COOKIE,
+        token,
+        max_age=_SESSION_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    return {"authenticated": _is_authenticated(request)}
+
+
+@app.get("/api/logout")
+async def do_logout():
+    response = RedirectResponse("/", status_code=302)
+    response.delete_cookie(_SESSION_COOKIE)
+    return response
+
+
+@app.get("/analysis", response_class=HTMLResponse)
+async def analysis_page(request: Request):
+    if not _is_authenticated(request):
+        return RedirectResponse("/login", status_code=302)
+    return HTMLResponse(content=(static_dir / "analysis.html").read_text())
 
 
 @app.get("/reports", response_class=HTMLResponse)
@@ -197,6 +274,7 @@ async def get_report(ticker: str, date: str):
             "sentiment_report":      raw.get("sentiment_report") or "",
             "news_report":           raw.get("news_report") or "",
             "fundamentals_report":   raw.get("fundamentals_report") or "",
+            "short_interest_report": raw.get("short_interest_report") or "",
             "investment_plan":       raw.get("investment_plan") or "",
             # legacy key name differs
             "trader_investment_plan": raw.get("trader_investment_plan")
@@ -214,6 +292,150 @@ async def get_company(code: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="No cached company data")
     return json.loads(path.read_text())
+
+
+@app.get("/api/performance")
+async def get_performance():
+    """Return all recommendations and summary stats from the performance DB."""
+    from tradingagents.performance.db import get_performance_data
+    return get_performance_data()
+
+
+@app.post("/api/performance/refresh")
+async def refresh_performance():
+    """Trigger snapshot fill for all pending recommendations (background)."""
+    from tradingagents.performance.db import refresh_all_snapshots
+    loop = asyncio.get_running_loop()
+    updated = await loop.run_in_executor(_executor, refresh_all_snapshots)
+    return {"updated": updated}
+
+
+@app.post("/api/performance/ingest")
+async def ingest_performance():
+    """Import any report files from logs dir not yet in the performance DB."""
+    from tradingagents.performance.db import ingest_from_logs
+    loop = asyncio.get_running_loop()
+    counts = await loop.run_in_executor(_executor, ingest_from_logs)
+    return counts
+
+
+@app.get("/performance", response_class=HTMLResponse)
+async def performance_page():
+    html = (Path(__file__).parent / "static" / "performance.html").read_text()
+    return HTMLResponse(html)
+
+
+@app.get("/sync", response_class=HTMLResponse)
+async def sync_page(request: Request):
+    if not _is_authenticated(request):
+        return RedirectResponse("/login", status_code=302)
+    return HTMLResponse(content=(static_dir / "sync.html").read_text())
+
+
+@app.get("/api/sync/local-reports")
+async def list_local_reports(request: Request):
+    if not _is_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    from datetime import date as _date
+    import re as _re
+    entries = []
+    if LOGS_DIR.exists():
+        for p in sorted(LOGS_DIR.iterdir()):
+            if not p.is_dir() or p.name.endswith(".log"):
+                continue
+            ticker = p.name
+            if '.' not in ticker:  # skip bare tickers (e.g. AAPL, BET) that lack an exchange suffix
+                continue
+            latest = None
+            # New format date dirs
+            for d in p.iterdir():
+                if not d.is_dir() or d.name == "TradingAgentsStrategy_logs":
+                    continue
+                if _re.match(r"\d{4}-\d{2}-\d{2}", d.name):
+                    if latest is None or d.name > latest:
+                        latest = d.name
+            # Legacy JSON logs
+            legacy = p / "TradingAgentsStrategy_logs"
+            if legacy.exists():
+                for f in legacy.glob("full_states_log_*.json"):
+                    d = f.stem.replace("full_states_log_", "")
+                    if latest is None or d > latest:
+                        latest = d
+            entries.append({"ticker": ticker, "latest_date": latest})
+    return {"tickers": entries}
+
+
+@app.post("/api/sync")
+async def run_sync(request: Request):
+    if not _is_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    body = await request.json()
+    selected: List[str] = body.get("tickers", [])  # empty = all
+
+    pem = next(
+        (p for p in [
+            Path(__file__).parent.parent / "racknerd2gb.pem",
+            Path(__file__).parent.parent.parent / "racknerd2gb.pem",
+            Path.home() / ".ssh" / "racknerd2gb.pem",
+        ] if p.exists()),
+        Path(__file__).parent.parent / "racknerd2gb.pem",
+    )
+    remote = "root@23.95.245.174:/root/.tradingagents/logs/"
+    local = str(LOGS_DIR) + "/"
+
+    cmd = [
+        "rsync", "--archive", "--checksum", "--human-readable",
+        "--stats", "--exclude=*.tmp", "--exclude=*.bak",
+        "-e", f"ssh -i {pem} -o StrictHostKeyChecking=no",
+    ]
+
+    if selected:
+        # Include only selected tickers; exclude everything else
+        for ticker in selected:
+            cmd += [f"--include={ticker}/***"]
+        cmd += ["--exclude=*"]
+
+    cmd += [local, remote]
+
+    async def generate():
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        yield f"data: {json.dumps({'type': 'start', 'cmd': ' '.join(cmd[-2:])})}\n\n"
+        async for line in proc.stdout:
+            text = line.decode(errors="replace").rstrip()
+            if text:
+                yield f"data: {json.dumps({'type': 'line', 'text': text})}\n\n"
+        await proc.wait()
+        yield f"data: {json.dumps({'type': 'done', 'code': proc.returncode})}\n\n"
+
+        # After a successful sync, trigger DB ingest on the remote server
+        if proc.returncode == 0:
+            try:
+                yield f"data: {json.dumps({'type': 'line', 'text': 'Updating remote performance DB…'})}\n\n"
+                ingest_proc = await asyncio.create_subprocess_exec(
+                    "ssh",
+                    "-i", str(pem),
+                    "-o", "StrictHostKeyChecking=no",
+                    "root@23.95.245.174",
+                    "curl -s -X POST http://localhost:7777/api/performance/ingest",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                out, _ = await ingest_proc.communicate()
+                result = out.decode(errors="replace").strip()
+                yield f"data: {json.dumps({'type': 'line', 'text': f'DB ingest: {result}'})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'line', 'text': f'DB ingest failed: {exc}'})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/analyze")

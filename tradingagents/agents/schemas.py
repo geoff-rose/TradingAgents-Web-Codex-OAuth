@@ -164,65 +164,156 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Portfolio Manager
+# Portfolio Manager — scored decision
 # ---------------------------------------------------------------------------
+
+_SCORE_THRESHOLDS = [
+    (70, PortfolioRating.BUY),
+    (55, PortfolioRating.OVERWEIGHT),
+    (38, PortfolioRating.HOLD),
+    (22, PortfolioRating.UNDERWEIGHT),
+]
+
+
+def _rating_from_score(total: int) -> PortfolioRating:
+    for threshold, rating in _SCORE_THRESHOLDS:
+        if total >= threshold:
+            return rating
+    return PortfolioRating.SELL
 
 
 class PortfolioDecision(BaseModel):
-    """Structured output produced by the Portfolio Manager.
+    """Scored decision produced by the Portfolio Manager.
 
-    The model fills every field as part of its primary LLM call; no separate
-    extraction pass is required. Field descriptions double as the model's
-    output instructions, so the prompt body only needs to convey context and
-    the rating-scale guidance.
+    Score each dimension using the rubric in the prompt, then provide
+    brief reasoning for each score and an overall thesis. The final
+    rating is derived automatically from the total score — do not invent
+    a separate rating field.
     """
 
-    rating: PortfolioRating = Field(
+    # ── Scores (integers, must stay within the stated max) ──────────────
+    technical_score: int = Field(
         description=(
-            "The final position rating. Exactly one of Buy / Overweight / Hold / "
-            "Underweight / Sell, picked based on the analysts' debate."
+            "Technical trend score 0–25. "
+            "20-25: clear confirmed uptrend, price well above rising 50d & 200d MA, positive MACD, RSI 50–70. "
+            "14-19: constructive, above 200d MA with improving momentum. "
+            "8-13: mixed, near MAs, no clear direction. "
+            "3-7: weakening, below 50d MA or MACD turning negative. "
+            "0-2: clear downtrend, below both MAs, falling 200d."
         ),
     )
-    executive_summary: str = Field(
+    technical_reasoning: str = Field(
+        description="One or two sentences explaining the technical score.",
+    )
+
+    fundamentals_score: int = Field(
         description=(
-            "A concise action plan covering entry strategy, position sizing, "
-            "key risk levels, and time horizon. Two to four sentences."
+            "Fundamentals quality score 0–25. "
+            "20-25: excellent — high margins (>20% net), strong ROE (>20%), clean balance sheet, growing revenue. "
+            "14-19: good — solid profitability, manageable debt, stable earnings. "
+            "8-13: average — adequate margins, some balance sheet concerns, mixed growth. "
+            "3-7: weak — thin margins, deteriorating earnings or heavy debt. "
+            "0-2: poor — losses, solvency concerns, fundamental deterioration."
         ),
     )
+    fundamentals_reasoning: str = Field(
+        description="One or two sentences explaining the fundamentals score.",
+    )
+
+    valuation_score: int = Field(
+        description=(
+            "Valuation attractiveness score 0–20. "
+            "17-20: attractive — meaningful discount to peers/history, PEG <1, or yield well above sector peers. Quantifiably cheap. "
+            "12-16: fair value — at or modest premium to sector peers; growth/quality justifies the multiple. "
+            "6-11: expensive — notable stretch in multiples relative to growth, limited margin of safety. "
+            "2-5: very expensive — extreme multiples, strong growth already fully priced in. "
+            "0-1: bubble territory — no rational valuation support."
+        ),
+    )
+    valuation_reasoning: str = Field(
+        description="One or two sentences explaining the valuation score.",
+    )
+
+    sentiment_score: int = Field(
+        description=(
+            "Sentiment and news score 0–15. "
+            "12-15: strongly positive — clear bullish company-specific news flow, positive analyst upgrades or revisions, concrete catalysts. "
+            "8-11: mildly positive — recent results beat or minor positive announcements; constructive tone with company-specific evidence. "
+            "5-7: neutral — no material company-specific news in the past 14 days, or mixed signals. A positive macro/sector backdrop (e.g. gold price strength, sector tailwinds) WITHOUT a company-specific catalyst scores in this band, not higher. "
+            "1-4: negative — concerning headlines, earnings misses, analyst downgrades, or cautious guidance. "
+            "0: severely negative — material adverse news or a significant sentiment breakdown."
+        ),
+    )
+    sentiment_reasoning: str = Field(
+        description="One or two sentences explaining the sentiment score.",
+    )
+
+    risk_score: int = Field(
+        description=(
+            "Risk profile score 0–15 (higher = LOWER risk). "
+            "Balance-sheet leverage, solvency, and cash generation are already scored under fundamentals_score — do NOT re-score them here. Score only volatility, concentration, and execution/regulatory/event risk. "
+            "12-15: low risk — ATR <2% daily, diversified revenue base across markets/products/customers, no pending binary catalysts, no material execution or regulatory overhang. "
+            "8-11: moderate risk — ATR 2–4% daily, some concentration (single major product, customer, or region) or execution uncertainty, no existential threat. "
+            "4-7: elevated risk — ATR 4–8% daily OR meaningful concentration/execution/regulatory exposure. Single-asset or single-country operations are capped at 7 regardless of business quality. "
+            "0-3: high risk — ATR >8% daily, binary outcome risk (e.g. single regulatory approval, trial readout, contract renewal), or an event that could reprice the stock sharply independent of its underlying fundamentals."
+        ),
+    )
+    risk_reasoning: str = Field(
+        description="One or two sentences explaining the risk score.",
+    )
+
+    # ── Narrative ────────────────────────────────────────────────────────
     investment_thesis: str = Field(
         description=(
-            "Detailed reasoning anchored in specific evidence from the analysts' "
-            "debate. If prior lessons are referenced in the prompt context, "
-            "incorporate them; otherwise rely solely on the current analysis."
+            "Overall investment thesis: what the scores mean together, the key "
+            "bull and bear points from the debate, and the recommended portfolio action."
         ),
     )
     price_target: Optional[float] = Field(
         default=None,
-        description="Optional target price in the instrument's quote currency.",
+        description="Optional price target in the instrument's quote currency.",
     )
     time_horizon: Optional[str] = Field(
         default=None,
-        description="Optional recommended holding period, e.g. '3-6 months'.",
+        description="Optional holding period, e.g. '6–12 months'.",
     )
 
 
 def render_pm_decision(decision: PortfolioDecision) -> str:
-    """Render a PortfolioDecision back to the markdown shape the rest of the system expects.
+    """Render a PortfolioDecision scorecard to markdown."""
+    total = (
+        decision.technical_score
+        + decision.fundamentals_score
+        + decision.valuation_score
+        + decision.sentiment_score
+        + decision.risk_score
+    )
+    # Clamp individual scores to their maxima before summing
+    total = min(total, 100)
+    rating = _rating_from_score(total)
 
-    Memory log, CLI display, and saved report files all read this markdown,
-    so the rendered output preserves the exact section headers (``**Rating**``,
-    ``**Executive Summary**``, ``**Investment Thesis**``) that downstream
-    parsers and the report writers already handle.
-    """
-    parts = [
-        f"**Rating**: {decision.rating.value}",
+    lines = [
+        f"## Rating: **{rating.value}** (Score: {total}/100)",
         "",
-        f"**Executive Summary**: {decision.executive_summary}",
+        "### Scorecard",
         "",
-        f"**Investment Thesis**: {decision.investment_thesis}",
+        "| Dimension | Score | Max | Reasoning |",
+        "|-----------|------:|----:|-----------|",
+        f"| Technical Trend     | {decision.technical_score:>2} | 25 | {decision.technical_reasoning} |",
+        f"| Fundamentals        | {decision.fundamentals_score:>2} | 25 | {decision.fundamentals_reasoning} |",
+        f"| Valuation           | {decision.valuation_score:>2} | 20 | {decision.valuation_reasoning} |",
+        f"| Sentiment / News    | {decision.sentiment_score:>2} | 15 | {decision.sentiment_reasoning} |",
+        f"| Risk (lower = worse)| {decision.risk_score:>2} | 15 | {decision.risk_reasoning} |",
+        f"| **Total**           | **{total}** | **100** | |",
+        "",
+        "**Thresholds**: Buy ≥70 · Overweight ≥55 · Hold ≥38 · Underweight ≥22 · Sell <22",
+        "",
+        "### Investment Thesis",
+        "",
+        decision.investment_thesis,
     ]
     if decision.price_target is not None:
-        parts.extend(["", f"**Price Target**: {decision.price_target}"])
+        lines.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:
-        parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
-    return "\n".join(parts)
+        lines.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
+    return "\n".join(lines)

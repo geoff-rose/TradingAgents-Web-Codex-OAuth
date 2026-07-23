@@ -27,6 +27,7 @@ rsync \
   --human-readable \
   --stats \
   --exclude="*.tmp" \
+  --exclude="*.bak" \
   -e "ssh -i $PEM_FILE -o StrictHostKeyChecking=no" \
   "$LOCAL_LOGS" \
   "$REMOTE_LOGS"

@@ -28,7 +28,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
 )
 from tradingagents.dataflows.hotcopper import fetch_hotcopper_posts
-from tradingagents.dataflows.reddit import ASX_SUBREDDITS, DEFAULT_SUBREDDITS, fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
 
@@ -54,7 +53,6 @@ def create_sentiment_analyst(llm):
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         is_asx = ticker.upper().endswith(".AX")
-        reddit_subs = ASX_SUBREDDITS if is_asx else DEFAULT_SUBREDDITS
 
         news_block = get_news.func(ticker, start_date, end_date)
         # StockTwits is US-centric and uses bare ticker symbols with no exchange
@@ -62,7 +60,6 @@ def create_sentiment_analyst(llm):
         # shares the same 3-letter code (e.g. ALK.AX → Alaska Airlines), which is
         # actively misleading. Skip it for ASX stocks; use HotCopper instead.
         stocktwits_block = None if is_asx else fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
         hotcopper_block = fetch_hotcopper_posts(ticker) if is_asx else None
 
         system_message = _build_system_message(
@@ -71,8 +68,6 @@ def create_sentiment_analyst(llm):
             end_date=end_date,
             news_block=news_block,
             stocktwits_block=stocktwits_block,
-            reddit_block=reddit_block,
-            reddit_subs=reddit_subs,
             hotcopper_block=hotcopper_block,
         )
 
@@ -114,23 +109,9 @@ def _build_system_message(
     end_date: str,
     news_block: str,
     stocktwits_block: str | None,
-    reddit_block: str,
-    reddit_subs: tuple[str, ...],
     hotcopper_block: str | None,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
-    subs_label = ", ".join(f"r/{s}" for s in reddit_subs)
-    is_asx = ticker.upper().endswith(".AX")
-    reddit_context = (
-        "Australian retail investor community discussion. r/AusFinance skews toward long-term investors; "
-        "r/ASX is ticker-focused with more active traders; r/ausstocks is more speculative. "
-        "Engagement via upvote score and comment count."
-        if is_asx else
-        "Community discussion. Engagement signal via upvote score and comment count. "
-        "Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; "
-        "r/stocks more measured; r/investing longer-term)."
-    )
-
     st_section = f"""
 ### StockTwits messages — retail-trader social platform indexed by cashtag
 Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
@@ -149,7 +130,7 @@ The most active ASX retail forum. Thread titles reflect what Australian retail i
 <end_of_hotcopper>
 """ if hotcopper_block else ""
 
-    source_count = 2 + bool(stocktwits_block) + bool(hotcopper_block)
+    source_count = 1 + bool(stocktwits_block) + bool(hotcopper_block)
 
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on {source_count} complementary data sources that have already been collected for you.
 
@@ -161,27 +142,18 @@ Institutional framing. Fact-driven, slower-moving signal.
 <start_of_news>
 {news_block}
 <end_of_news>
-{st_section}
-### Reddit posts — {subs_label} (past 7 days)
-{reddit_context}
-
-<start_of_reddit>
-{reddit_block}
-<end_of_reddit>
-{hc_section}
+{st_section}{hc_section}
 ## How to analyze this data (best practices)
 
 1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
 
 2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
 
-3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
+3. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
 
-4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
+4. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
 
-5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
-
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this caveat explicitly. If the sources are silent on a given subreddit, say so.
+5. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this caveat explicitly.
 
 7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 
@@ -192,12 +164,22 @@ Institutional framing. Fact-driven, slower-moving signal.
 Produce a sentiment report covering, in order:
 
 1. **Overall sentiment direction** — Bullish / Bearish / Neutral / Mixed — with a brief confidence note based on data quality and sample size.
-2. **Source-by-source breakdown** — what each of news / StockTwits / Reddit is telling you, with specific evidence (cite message counts, ratios, notable posts).
+2. **Source-by-source breakdown** — what each available source (news, StockTwits, HotCopper) is telling you, with specific evidence (cite message counts, ratios, notable posts).
 3. **Divergences, alignments, and key narratives** across sources.
 4. **Catalysts and risks** surfaced by the data.
 5. **Markdown table** at the end summarizing key sentiment signals, their direction, source, and supporting evidence.
 
-{get_language_instruction()}"""
+{get_language_instruction()}
+
+Finally, conclude your report with a section using **exactly** this format (do not skip it):
+
+## Analyst Signal
+**Signal:** [one of: Buy | Overweight | Hold | Underweight | Sell]
+**Confidence:** [0-100]/100
+**Outlook:** [0-100]/100
+**Rationale:** [One sentence summarising your key reasoning]
+
+Outlook is a directional score: 100 = maximally bullish signals, 0 = maximally bearish, 50 = neutral/mixed. It reflects the overall quality of the data for the company right now, independent of your confidence in the signal."""
 
 
 # ---------------------------------------------------------------------------

@@ -141,6 +141,33 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
+    "xai-grok": {
+        "quick": [
+            ("Grok 4.20 (Non-Reasoning) - SuperGrok OAuth, latest fast", "grok-4.20-non-reasoning"),
+            ("Grok 4 Fast (Non-Reasoning) - SuperGrok OAuth, speed-optimized", "grok-4-fast-non-reasoning"),
+            ("Grok 4 Fast (Reasoning) - SuperGrok OAuth, high-performance", "grok-4-fast-reasoning"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("Grok 4.20 (Reasoning) - SuperGrok OAuth, latest frontier", "grok-4.20-reasoning"),
+            ("Grok 4 - SuperGrok OAuth, flagship", "grok-4-0709"),
+            ("Grok 4 Fast (Reasoning) - SuperGrok OAuth, high-performance", "grok-4-fast-reasoning"),
+            ("Grok 4.20 - SuperGrok OAuth, auto-select reasoning", "grok-4.20"),
+            ("Custom model ID", "custom"),
+        ],
+    },
+    "hermes-claude": {
+        "quick": [
+            ("Claude Haiku 4.5 - Fastest", "claude-haiku-4-5"),
+            ("Claude Sonnet 4.6 - Best balance", "claude-sonnet-4-6"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("Claude Sonnet 4.6 - Best balance", "claude-sonnet-4-6"),
+            ("Claude Opus 4.7 - Most capable", "claude-opus-4-7"),
+            ("Custom model ID", "custom"),
+        ],
+    },
     "openai-codex": {
         "quick": [
             ("GPT-5.5 - ChatGPT Codex OAuth", "gpt-5.5"),

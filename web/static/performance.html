@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Performance — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --over:     #86efac;
+    --under:    #fca5a5;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+  /* ── Header ── */
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  /* ── Layout ── */
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+  /* ── Summary grid ── */
+  .summary-section { margin-bottom: 32px; }
+  .summary-section h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .signal-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .signal-card .sig-label { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+  .sig-label.Buy, .sig-label.Overweight { color: var(--buy); }
+  .sig-label.Sell, .sig-label.Underweight { color: var(--sell); }
+  .sig-label.Hold { color: var(--hold); }
+  .hz-row { display: flex; justify-content: space-between; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .hz-row:last-child { border-bottom: none; }
+  .hz-label { color: var(--muted); width: 30px; }
+  .hz-win  { font-weight: 600; }
+  .hz-ret  { color: var(--muted); }
+  .pos { color: var(--buy); }
+  .neg { color: var(--sell); }
+  .neu { color: var(--muted); }
+
+  /* ── Filters ── */
+  .filters { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters select, .filters input {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 6px 10px; font-size: 13px;
+  }
+  .filters input { width: 180px; }
+  .btn {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { opacity: 0.85; }
+  .count { color: var(--muted); font-size: 12px; }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: var(--surface); color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; position: sticky; top: 0; border-bottom: 2px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+  th:hover { color: var(--text); }
+  th .sort-arrow { opacity: 0.4; font-size: 10px; }
+  th.sorted .sort-arrow { opacity: 1; }
+  td { padding: 7px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .ticker-link { color: var(--accent); text-decoration: none; }
+  .ticker-link:hover { text-decoration: underline; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .badge.Buy        { background: rgba(34,197,94,0.15);  color: var(--buy); }
+  .badge.Overweight { background: rgba(134,239,172,0.15); color: var(--over); }
+  .badge.Hold       { background: rgba(245,158,11,0.15); color: var(--hold); }
+  .badge.Underweight{ background: rgba(252,165,165,0.15); color: var(--under); }
+  .badge.Sell       { background: rgba(239,68,68,0.15);  color: var(--sell); }
+  .ret-cell { text-align: right; }
+  .ret-pos { color: var(--buy); font-weight: 500; }
+  .ret-neg { color: var(--sell); font-weight: 500; }
+  .ret-na  { color: var(--border); }
+  .loading { text-align: center; color: var(--muted); padding: 60px; }
+  .error   { color: var(--sell); padding: 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance" class="active">Performance</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <button class="btn" id="ingest-btn" onclick="ingestReports()">⬇ Import Reports</button>
+    <button class="btn" id="refresh-btn" onclick="refreshSnapshots()">↻ Refresh Snapshots</button>
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="page">
+  <h1>Recommendation Performance</h1>
+  <p class="subtitle">Tracks how each recommendation performed at 1, 3, 6, and 12 month horizons vs the benchmark.</p>
+
+  <div id="summary-section" class="summary-section" style="display:none">
+    <h2>Win Rate by Signal</h2>
+    <div class="summary-grid" id="summary-grid"></div>
+  </div>
+
+  <div class="filters">
+    <select id="week-filter" onchange="onWeekChange()">
+      <option value="">All time</option>
+    </select>
+    <input id="search" placeholder="Search ticker…" oninput="renderTable()">
+    <select id="sig-filter" onchange="renderTable()">
+      <option value="">All signals</option>
+      <option>Buy</option>
+      <option>Overweight</option>
+      <option>Hold</option>
+      <option>Underweight</option>
+      <option>Sell</option>
+    </select>
+    <select id="hz-filter" onchange="renderTable()">
+      <option value="">Show all horizons</option>
+      <option value="1m">Has 1m data</option>
+      <option value="3m">Has 3m data</option>
+      <option value="6m">Has 6m data</option>
+      <option value="12m">Has 12m data</option>
+    </select>
+    <span class="count" id="row-count"></span>
+  </div>
+
+  <div id="loading" class="loading">Loading…</div>
+  <div id="error"   class="error"   style="display:none"></div>
+
+  <div class="table-wrap" id="table-wrap" style="display:none">
+    <table id="perf-table">
+      <thead>
+        <tr>
+          <th onclick="sortBy('ticker')">Ticker <span class="sort-arrow">↕</span></th>
+          <th onclick="sortBy('rec_date')">Date <span class="sort-arrow">↕</span></th>
+          <th onclick="sortBy('signal')">Signal <span class="sort-arrow">↕</span></th>
+          <th onclick="sortBy('score')" style="text-align:center">Score <span class="sort-arrow">↕</span></th>
+          <th onclick="sortBy('price')">Entry $ <span class="sort-arrow">↕</span></th>
+          <th class="ret-cell" onclick="sortBy('r1m')">1m % <span class="sort-arrow">↕</span></th>
+          <th class="ret-cell" onclick="sortBy('r3m')">3m % <span class="sort-arrow">↕</span></th>
+          <th class="ret-cell" onclick="sortBy('r6m')">6m % <span class="sort-arrow">↕</span></th>
+          <th class="ret-cell" onclick="sortBy('r12m')">12m % <span class="sort-arrow">↕</span></th>
+          <th class="ret-cell" onclick="sortBy('a3m')">3m α <span class="sort-arrow">↕</span></th>
+          <th class="ret-cell" onclick="sortBy('a12m')">12m α <span class="sort-arrow">↕</span></th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  let allRecords = [];
+  let sortKey = 'rec_date';
+  let sortAsc  = false;
+
+  const HORIZONS = ['1m', '3m', '6m', '12m'];
+
+  // Return the ISO week key "YYYY-Www" and the date of that week's Sunday.
+  function weekKey(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    const day = d.getDay(); // 0=Sun, 1=Mon … 6=Sat
+    const sunday = new Date(d);
+    sunday.setDate(d.getDate() - day); // roll back to Sunday
+    // Use local date methods — toISOString() returns UTC and shifts the date in +ve timezones
+    const y  = sunday.getFullYear();
+    const mo = String(sunday.getMonth() + 1).padStart(2, '0');
+    const dy = String(sunday.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${dy}`;
+  }
+
+  function weekLabel(sundayStr) {
+    const sun = new Date(sundayStr + 'T00:00:00');
+    // ISO week number: find Thursday of the same week (ISO standard)
+    const thu = new Date(sun);
+    thu.setDate(sun.getDate() + 4); // Sunday + 4 = Thursday
+    const yearStart = new Date(thu.getFullYear(), 0, 1);
+    const weekNum = Math.ceil(((thu - yearStart) / 86400000 + 1) / 7);
+    const sunLabel = sun.toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' });
+    return `Week ${weekNum} — Sun ${sunLabel}`;
+  }
+
+  // Returns the cohort for the selected week:
+  // latest report per ticker within that week, or all records if no week selected.
+  function activeCohort() {
+    const week = document.getElementById('week-filter').value;
+    if (!week) return allRecords;
+    const inWeek = allRecords.filter(r => weekKey(r.rec_date) === week);
+    const byTicker = {};
+    for (const r of inWeek) {
+      if (!byTicker[r.ticker] || r.rec_date > byTicker[r.ticker].rec_date)
+        byTicker[r.ticker] = r;
+    }
+    return Object.values(byTicker);
+  }
+
+  function populateWeeks() {
+    const weeks = [...new Set(allRecords.map(r => weekKey(r.rec_date)))]
+      .sort().reverse();
+    const sel = document.getElementById('week-filter');
+    for (const w of weeks) {
+      const opt = document.createElement('option');
+      opt.value = w;
+      opt.textContent = weekLabel(w);
+      sel.appendChild(opt);
+    }
+    if (weeks.length) sel.value = weeks[0];
+  }
+
+  function onWeekChange() {
+    renderSummaryFromRecords(activeCohort());
+    renderTable();
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/api/performance');
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      allRecords = data.records;
+      populateWeeks();
+      const cohort = activeCohort();
+      renderSummaryFromRecords(cohort);
+      renderTable();
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('table-wrap').style.display = 'block';
+      document.getElementById('summary-section').style.display = 'block';
+    } catch (e) {
+      document.getElementById('loading').style.display = 'none';
+      const el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = 'Failed to load: ' + e.message;
+    }
+  }
+
+  function renderSummaryFromRecords(records) {
+    const bullish = new Set(['Buy', 'Overweight']);
+    const bearish  = new Set(['Sell', 'Underweight']);
+    // Aggregate by signal × horizon
+    const stats = {};
+    for (const r of records) {
+      const sig = r.signal;
+      if (!stats[sig]) stats[sig] = {};
+      for (const hz of HORIZONS) {
+        const snap = r.snapshots[hz];
+        if (!snap) continue;
+        if (!stats[sig][hz]) stats[sig][hz] = [];
+        stats[sig][hz].push(snap.raw_return);
+      }
+    }
+
+    const grid = document.getElementById('summary-grid');
+    grid.innerHTML = '';
+    const order = ['Buy', 'Overweight', 'Hold', 'Underweight', 'Sell'];
+    for (const sig of order) {
+      const hz = stats[sig];
+      if (!hz) continue;
+      const card = document.createElement('div');
+      card.className = 'signal-card';
+      const rows = HORIZONS.map(h => {
+        const returns = hz[h];
+        if (!returns || !returns.length)
+          return `<div class="hz-row"><span class="hz-label">${h}</span><span class="hz-ret neu">—</span></div>`;
+        const wins = returns.filter(r =>
+          bullish.has(sig) ? r > 0 : bearish.has(sig) ? r < 0 : Math.abs(r) < 5
+        ).length;
+        const winRate  = (wins / returns.length * 100).toFixed(0);
+        const avgRet   = (returns.reduce((a, b) => a + b, 0) / returns.length).toFixed(1);
+        const winCls = winRate >= 60 ? 'pos' : winRate <= 40 ? 'neg' : 'neu';
+        const retCls = avgRet > 0 ? 'pos' : avgRet < 0 ? 'neg' : 'neu';
+        return `<div class="hz-row">
+          <span class="hz-label">${h}</span>
+          <span class="hz-win ${winCls}">${winRate}% (${returns.length})</span>
+          <span class="hz-ret ${retCls}">${avgRet > 0 ? '+' : ''}${avgRet}%</span>
+        </div>`;
+      }).join('');
+      card.innerHTML = `<div class="sig-label ${sig}">${sig}</div>${rows}`;
+      grid.appendChild(card);
+    }
+  }
+
+  function flattenRecord(r) {
+    return {
+      ...r,
+      r1m:  r.snapshots['1m']?.raw_return  ?? null,
+      r3m:  r.snapshots['3m']?.raw_return  ?? null,
+      r6m:  r.snapshots['6m']?.raw_return  ?? null,
+      r12m: r.snapshots['12m']?.raw_return ?? null,
+      a3m:  r.snapshots['3m']?.alpha_return  ?? null,
+      a12m: r.snapshots['12m']?.alpha_return ?? null,
+    };
+  }
+
+  function renderTable() {
+    const search   = document.getElementById('search').value.toLowerCase();
+    const sigFilt  = document.getElementById('sig-filter').value;
+    const hzFilt   = document.getElementById('hz-filter').value;
+    const week     = document.getElementById('week-filter').value;
+
+    // Update subtitle
+    const sub = document.querySelector('.subtitle');
+    if (week) {
+      sub.textContent = `Showing the last report per stock for ${weekLabel(week)} — how did those recommendations perform?`;
+    } else {
+      sub.textContent = 'Tracks how each recommendation performed at 1, 3, 6, and 12 month horizons vs the benchmark.';
+    }
+
+    let rows = activeCohort().map(flattenRecord).filter(r => {
+      if (search  && !r.ticker.toLowerCase().includes(search)) return false;
+      if (sigFilt && r.signal !== sigFilt) return false;
+      if (hzFilt  && r.snapshots[hzFilt] == null) return false;
+      return true;
+    });
+
+    // Sort
+    rows.sort((a, b) => {
+      const av = a[sortKey] ?? (sortAsc ? Infinity : -Infinity);
+      const bv = b[sortKey] ?? (sortAsc ? Infinity : -Infinity);
+      if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortAsc ? av - bv : bv - av;
+    });
+
+    document.getElementById('row-count').textContent = `${rows.length} recommendations`;
+
+    const tbody = document.getElementById('table-body');
+    tbody.innerHTML = rows.map(r => {
+      const scoreBar = r.score != null ? `${r.score}` : '—';
+      const price = r.price != null ? `$${r.price.toFixed(3)}` : '—';
+      return `<tr>
+        <td><a class="ticker-link" href="/reports?ticker=${encodeURIComponent(r.ticker)}">${r.ticker}</a></td>
+        <td>${r.rec_date}</td>
+        <td><span class="badge ${r.signal}">${r.signal}</span></td>
+        <td style="text-align:center">${scoreBar}</td>
+        <td>${price}</td>
+        ${retCell(r.r1m)}
+        ${retCell(r.r3m)}
+        ${retCell(r.r6m)}
+        ${retCell(r.r12m)}
+        ${retCell(r.a3m)}
+        ${retCell(r.a12m)}
+      </tr>`;
+    }).join('');
+  }
+
+  function retCell(val) {
+    if (val == null) return '<td class="ret-cell ret-na">—</td>';
+    const cls = val > 0 ? 'ret-pos' : val < 0 ? 'ret-neg' : '';
+    return `<td class="ret-cell ${cls}">${val > 0 ? '+' : ''}${val.toFixed(1)}%</td>`;
+  }
+
+  function scoreColour(s) {
+    if (s >= 70) return '#22c55e';
+    if (s >= 55) return '#86efac';
+    if (s >= 38) return '#f59e0b';
+    if (s >= 22) return '#fca5a5';
+    return '#ef4444';
+  }
+
+  function sortBy(key) {
+    if (sortKey === key) { sortAsc = !sortAsc; }
+    else { sortKey = key; sortAsc = key === 'ticker' || key === 'rec_date'; }
+    document.querySelectorAll('th').forEach(th => th.classList.remove('sorted'));
+    event.currentTarget.classList.add('sorted');
+    renderTable();
+  }
+
+  async function ingestReports() {
+    const btn = document.getElementById('ingest-btn');
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    try {
+      const res = await fetch('/api/performance/ingest', { method: 'POST' });
+      const data = await res.json();
+      btn.textContent = `⬇ Imported ${data.imported}`;
+      await load();
+    } catch (e) {
+      btn.textContent = 'Error';
+    } finally {
+      setTimeout(() => { btn.disabled = false; btn.textContent = '⬇ Import Reports'; }, 4000);
+    }
+  }
+
+  async function refreshSnapshots() {
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+    try {
+      const res = await fetch('/api/performance/refresh', { method: 'POST' });
+      const data = await res.json();
+      btn.textContent = `↻ Updated ${data.updated}`;
+      await load();
+    } catch (e) {
+      btn.textContent = 'Error';
+    } finally {
+      setTimeout(() => { btn.disabled = false; btn.textContent = '↻ Refresh Snapshots'; }, 3000);
+    }
+  }
+
+  fetch('/api/auth/status').then(r => r.json()).then(d => {
+    if (d.authenticated) {
+      document.getElementById('analysis-nav-link').style.display = '';
+      document.getElementById('reports-nav-link').style.display = '';
+      document.getElementById('sync-nav-link').style.display = '';
+      document.getElementById('logout-nav-link').style.display = '';
+    }
+  }).catch(() => {});
+
+  load();
+</script>
+</body>
+</html>

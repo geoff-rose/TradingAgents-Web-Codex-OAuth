@@ -52,7 +52,7 @@ class TradingAgentsGraph:
 
     def __init__(
         self,
-        selected_analysts=["market", "social", "news", "fundamentals"],
+        selected_analysts=["market", "social", "news", "fundamentals", "short"],
         debug=False,
         config: Dict[str, Any] = None,
         callbacks: Optional[List] = None,
@@ -188,6 +188,9 @@ class TradingAgentsGraph:
                     get_income_statement,
                 ]
             ),
+            # Short interest analyst pre-fetches data in the node itself (no tool calls);
+            # this empty ToolNode satisfies the graph wiring without needing any tools.
+            "short": ToolNode([]),
         }
 
     def _resolve_benchmark(self, ticker: str) -> str:
@@ -389,6 +392,7 @@ class TradingAgentsGraph:
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
             "fundamentals_report": final_state["fundamentals_report"],
+            "short_interest_report": final_state.get("short_interest_report", ""),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
@@ -421,6 +425,20 @@ class TradingAgentsGraph:
         log_path = directory / f"full_states_log_{trade_date}.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(self.log_states_dict[str(trade_date)], f, indent=4)
+
+        # Record in performance DB (non-fatal if it fails)
+        try:
+            from tradingagents.performance.db import record_recommendation
+            from tradingagents.agents.utils.rating import parse_rating
+            signal = parse_rating(final_state.get("final_trade_decision", ""))
+            record_recommendation(
+                ticker=self.ticker,
+                rec_date=str(trade_date),
+                signal=signal,
+                final_trade_decision=final_state.get("final_trade_decision", ""),
+            )
+        except Exception as _perf_exc:
+            logger.warning("Performance DB record failed (non-fatal): %s", _perf_exc)
 
     def process_signal(self, full_signal):
         """Process a signal to extract the core decision."""

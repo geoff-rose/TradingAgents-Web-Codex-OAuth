@@ -71,16 +71,18 @@ Score each dimension independently using the evidence from the analysts. Be accu
 - **0–1**: Very expensive — extreme multiples
 
 ### 4. Sentiment & News (0–15)
-- **12–15**: Strong positive — bullish news flow, positive revisions, constructive sentiment
-- **8–11**: Mildly positive or neutral — mixed news, no major negatives
-- **4–7**: Neutral to slightly negative — some concerning headlines, cautious sentiment
-- **0–3**: Negative — adverse news flow, negative revisions, bearish sentiment
+- **12–15**: Strong positive — bullish company-specific news flow, positive analyst revisions, clear catalysts
+- **8–11**: Mildly positive — recent results beat, minor positive announcements, constructive tone
+- **5–7**: Neutral — no material company-specific news in the past 14 days, or mixed signals; a supportive macro/sector backdrop alone (e.g. gold price, sector tailwind) does NOT justify above this band without a company-specific catalyst
+- **1–4**: Negative — concerning headlines, earnings misses, analyst downgrades, cautious guidance
+- **0**: Severely negative — material adverse news or significant sentiment breakdown
 
 ### 5. Risk Profile (0–15) — higher score = LOWER risk
-- **12–15**: Low risk — minimal debt, proven cash generation, no material execution risk
-- **8–11**: Moderate risk — manageable leverage, some execution uncertainty
-- **4–7**: Elevated risk — meaningful debt or significant execution/regulatory risk
-- **0–3**: High risk — leverage is a solvency concern, or binary outcome risk
+Balance-sheet leverage, solvency, and cash generation are already scored under Fundamentals — do NOT re-score them here. Score only volatility, concentration, and execution/regulatory/event risk.
+- **12–15**: Low risk — ATR <2% daily, diversified revenue base across markets/products/customers, no pending binary catalysts, no material execution or regulatory overhang
+- **8–11**: Moderate risk — ATR 2–4% daily, some concentration (single major product, customer, or region) or execution uncertainty, no existential threat
+- **4–7**: Elevated risk — ATR 4–8% daily OR meaningful concentration/execution/regulatory exposure. Single-asset or single-country operations cap this band at 7 regardless of business quality.
+- **0–3**: High risk — ATR >8% daily, binary outcome risk (e.g., single regulatory approval, trial readout, contract renewal), or an event that could reprice the stock sharply independent of its underlying fundamentals
 
 ---
 

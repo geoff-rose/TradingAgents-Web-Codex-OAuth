@@ -29,13 +29,13 @@ def create_research_manager(llm):
 ---
 
 **Rating Scale** (use exactly one):
-- **Buy**: Strong conviction in the bull thesis; recommend taking or growing the position
-- **Overweight**: Constructive view; recommend gradually increasing exposure
-- **Hold**: Balanced view; recommend maintaining the current position
-- **Underweight**: Cautious view; recommend trimming exposure
-- **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
+- **Buy**: The bull arguments outweighed the bear case. Recommend entering or adding at current prices. This is the normal positive rating — not reserved for perfect situations. Every stock debated will have bear arguments; Buy means the bulls won, not that bears had nothing to say.
+- **Overweight**: The bull side had an edge but one material, stock-specific reservation (not just "risks exist") justifies a more cautious sizing.
+- **Hold**: The debate was genuinely balanced — neither side clearly prevailed.
+- **Underweight**: The bear side had an edge. Reduce exposure.
+- **Sell**: The bear arguments clearly outweighed the bull case.
 
-Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
+**Calibration guidance**: Think like a sell-side analyst. Across a broad universe, expect roughly 30–40% Buy, 40% Hold, 20% Underweight/Sell. If you're clustering in the middle, you're not making a call — you're avoiding one. Be decisive: if the bulls won the debate, say Buy. "The bull case was credible but there are risks" describes every single Buy-rated stock in existence — that phrasing alone is not a reason to drop to Overweight.
 
 ---
 

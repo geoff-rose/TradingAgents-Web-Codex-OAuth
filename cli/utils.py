@@ -242,6 +242,7 @@ def select_llm_provider() -> tuple[str, str | None]:
     PROVIDERS = [
         ("OpenAI", "openai", "https://api.openai.com/v1"),
         ("OpenAI Codex (Hermes OAuth)", "openai-codex", "https://chatgpt.com/backend-api/codex"),
+        ("Anthropic Claude (Hermes OAuth)", "hermes-claude", "https://api.anthropic.com/"),
         ("Google", "google", None),
         ("Anthropic", "anthropic", "https://api.anthropic.com/"),
         ("xAI", "xai", "https://api.x.ai/v1"),

@@ -18,8 +18,18 @@ def get_YFin_data_online(
     # Create ticker object
     ticker = yf.Ticker(symbol.upper())
 
+    # yfinance end_date is exclusive. Extend by 3 days so a Saturday/Sunday
+    # end_date still includes the preceding Friday's close.
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    fetch_end = (end_dt + relativedelta(days=3)).strftime("%Y-%m-%d")
+
     # Fetch historical data for the specified date range
-    data = yf_retry(lambda: ticker.history(start=start_date, end=end_date))
+    data = yf_retry(lambda: ticker.history(start=start_date, end=fetch_end))
+
+    # Trim any rows after end_date (keeps look-ahead bias prevention intact)
+    if not data.empty and data.index.tz is not None:
+        cutoff = pd.Timestamp(end_date).tz_localize(data.index.tz)
+        data = data[data.index <= cutoff]
 
     # Check if data is empty
     if data.empty:

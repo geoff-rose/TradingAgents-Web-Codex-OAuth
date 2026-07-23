@@ -1,9 +1,10 @@
-"""OpenAI Codex OAuth client backed by Hermes credentials.
+"""OpenAI Codex OAuth client.
 
-This provider is intentionally separate from the normal ``openai`` provider.
-TradingAgents' ``openai`` path uses a public OpenAI API key.  ``openai-codex``
-uses the ChatGPT/Codex OAuth backend that Hermes stores in
-``~/.hermes/auth.json``.
+Uses the ChatGPT/Codex OAuth backend.  TradingAgents stores its own copy of
+the Codex credentials in ``~/.tradingagents/codex_auth.json`` so it never
+touches Hermes's ``~/.hermes/auth.json``.
+
+Override with the ``TRADINGAGENTS_CODEX_AUTH_FILE`` env var if needed.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import base64
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Type
 
@@ -21,13 +23,15 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from openai import OpenAI
+from openai import AuthenticationError, OpenAI
 from pydantic import BaseModel
 
 from .base_client import BaseLLMClient
 
 
 _CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+_CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
+_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 
 def _decode_jwt_payload(token: str) -> Dict[str, Any]:
@@ -58,7 +62,10 @@ def _read_hermes_codex_token() -> Optional[str]:
     if env_token:
         return env_token
 
-    auth_path = Path(os.environ.get("HERMES_AUTH_FILE", "~/.hermes/auth.json")).expanduser()
+    auth_path = Path(os.environ.get(
+        "TRADINGAGENTS_CODEX_AUTH_FILE",
+        "~/.tradingagents/codex_auth.json",
+    )).expanduser()
     try:
         data = json.loads(auth_path.read_text())
     except Exception:
@@ -72,6 +79,56 @@ def _read_hermes_codex_token() -> Optional[str]:
 
     token = data.get("providers", {}).get("openai-codex", {}).get("tokens", {}).get("access_token")
     return token if isinstance(token, str) and token else None
+
+
+def _refresh_codex_token() -> Optional[str]:
+    """Exchange the stored refresh_token for a new access_token and persist it."""
+    import httpx
+
+    auth_path = Path(os.environ.get(
+        "TRADINGAGENTS_CODEX_AUTH_FILE",
+        "~/.tradingagents/codex_auth.json",
+    )).expanduser()
+    try:
+        data = json.loads(auth_path.read_text())
+    except Exception:
+        return None
+
+    pool = data.get("credential_pool", {}).get("openai-codex") or []
+    entry = next((e for e in pool if e.get("refresh_token")), None)
+    if not entry:
+        return None
+
+    try:
+        resp = httpx.post(
+            _CODEX_TOKEN_URL,
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": entry["refresh_token"],
+                "client_id": _CODEX_CLIENT_ID,
+            },
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+        tokens = resp.json()
+    except Exception:
+        return None
+
+    new_access = tokens.get("access_token")
+    if not new_access:
+        return None
+
+    entry["access_token"] = new_access
+    entry["refresh_token"] = tokens.get("refresh_token", entry["refresh_token"])
+    entry["last_refresh"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        auth_path.parent.mkdir(parents=True, exist_ok=True)
+        auth_path.write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass
+
+    return new_access
 
 
 def _content_to_responses(content: Any) -> Any:
@@ -294,20 +351,37 @@ class CodexChatModel(BaseChatModel):
             request["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
             request["include"] = ["reasoning.encrypted_content"]
 
-        collected_text: List[str] = []
-        collected_items: List[Any] = []
-        with client.responses.stream(**request) as stream:
-            for event in stream:
-                event_type = getattr(event, "type", "")
-                if event_type == "response.output_item.done":
-                    item = getattr(event, "item", None)
-                    if item is not None:
-                        collected_items.append(item)
-                elif "output_text.delta" in event_type:
-                    delta = getattr(event, "delta", "")
-                    if delta:
-                        collected_text.append(delta)
-            response = stream.get_final_response()
+        def _do_stream(c: OpenAI) -> tuple:
+            texts: List[str] = []
+            items: List[Any] = []
+            with c.responses.stream(**request) as stream:
+                for event in stream:
+                    event_type = getattr(event, "type", "")
+                    if event_type == "response.output_item.done":
+                        item = getattr(event, "item", None)
+                        if item is not None:
+                            items.append(item)
+                    elif "output_text.delta" in event_type:
+                        delta = getattr(event, "delta", "")
+                        if delta:
+                            texts.append(delta)
+                return texts, items, stream.get_final_response()
+
+        try:
+            collected_text, collected_items, response = _do_stream(client)
+        except AuthenticationError as exc:
+            if "token_expired" not in str(exc):
+                raise
+            new_token = _refresh_codex_token()
+            if not new_token:
+                raise
+            client = OpenAI(
+                api_key=new_token,
+                base_url=self.base_url or _CODEX_BASE_URL,
+                default_headers=_codex_headers(new_token),
+            )
+            collected_text, collected_items, response = _do_stream(client)
+
         if not (getattr(response, "output", None) or None) and collected_items:
             response.output = collected_items
 

@@ -603,7 +603,7 @@ def get_user_selections():
             )
         )
         reasoning_effort = ask_openai_reasoning_effort()
-    elif provider_lower == "anthropic":
+    elif provider_lower in ("anthropic", "hermes-claude"):
         console.print(
             create_question_box(
                 "Step 8: Effort Level",
