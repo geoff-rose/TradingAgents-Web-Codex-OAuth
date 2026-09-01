@@ -217,3 +217,18 @@ __marimo__/
 
 # Cache
 **/data_cache/
+
+# --- Added 2026-09-01 -------------------------------------------------------
+# Live SQLite databases: churning binaries git handles badly, and they hold the
+# paper-trade record and scored-announcement history rather than any code.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Stale editor/backup copies
+*.bak-*
+
+# A stray duplicate of the FastAPI app that lives in web/static/ for no reason;
+# the real one is web/server.py.
+web/static/server.py
