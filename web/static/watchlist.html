@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watchlist — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .section-note { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  section { margin-bottom: 36px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }
+
+  .universe-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .universe-chip {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;
+    user-select: none;
+  }
+  .universe-chip.on { border-color: var(--accent); }
+  .universe-chip input { accent-color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .pos { color: var(--buy); }
+  .neg { color: var(--sell); }
+  .neu { color: var(--muted); }
+
+  .btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { opacity: 0.85; color: #fff; }
+  .btn.danger:hover { border-color: var(--sell); color: var(--sell); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.proposed { background: rgba(245,158,11,0.15); color: var(--hold); }
+  .badge.submitted { background: rgba(56,139,253,0.15); color: var(--accent); }
+  .badge.open { background: rgba(34,197,94,0.15); color: var(--buy); }
+  .badge.closed { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .badge.rejected, .badge.error { background: rgba(239,68,68,0.15); color: var(--sell); }
+
+  .pnl-tiles { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .pnl-tile { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; min-width: 120px; }
+  .pnl-tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .pnl-tile .value { font-size: 18px; font-weight: 700; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  .msg { font-size: 12px; margin-top: 8px; }
+  .msg.err { color: var(--sell); }
+  .msg.ok { color: var(--buy); }
+  .rationale { color: var(--muted); font-size: 11px; max-width: 260px; white-space: normal; }
+</style>
+<style>
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 24px; }
+  .bar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); }
+  .pill.full { background:rgba(34,197,94,.15); color:var(--buy); border-color:rgba(34,197,94,.4); }
+  .pill.mv   { background:rgba(56,139,253,.15); color:var(--accent); border-color:rgba(56,139,253,.4); }
+  .pill.watch{ color:var(--muted); }
+  .pill.bad  { background:rgba(239,68,68,.12); color:var(--sell); border-color:rgba(239,68,68,.35); }
+  .pill.ok   { background:rgba(34,197,94,.12); color:var(--buy); border-color:rgba(34,197,94,.35); }
+  .pill.warn { background:rgba(245,158,11,.13); color:var(--hold); border-color:rgba(245,158,11,.4); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase;
+       letter-spacing:.04em; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th.sortable { cursor:pointer; user-select:none; }
+  th.sortable:hover { color:var(--text); }
+  th .sort-arrow { opacity:.4; font-size:10px; margin-left:2px; }
+  th.sorted .sort-arrow { opacity:1; color:var(--accent); }
+  td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tr:hover td { background:var(--surface2); }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pos { color:var(--buy); } .neg { color:var(--sell); }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:18px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:12px; font-weight:600; }
+  .note { font-size:12px; color:var(--muted); line-height:1.55; }
+  .btn2 { background:var(--accent); color:#fff; border:none; padding:5px 11px; border-radius:6px; cursor:pointer; font-size:12px; }
+  .btn2.ghost { background:transparent; border:1px solid var(--border); color:var(--muted); }
+  .btn2:disabled { opacity:.5; cursor:default; }
+  input[type=number], input[type=text] { background:var(--bg); border:1px solid var(--border); color:var(--text);
+       border-radius:6px; padding:5px 8px; font-size:13px; width:100%; }
+  .hl { font-size:12px; color:var(--muted); max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .grid4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .stat { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+  .stat .v { font-size:19px; font-variant-numeric:tabular-nums; }
+  .stat .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  dialog { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:20px; min-width:340px; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  label { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:10px 0 4px; }
+
+  /* Gap-outcomes calendar. A day cell is a button so keyboard focus and
+     :disabled do the work -- days with no logged movers are genuinely not
+     selectable, rather than looking clickable and doing nothing. */
+  .cal-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+  .cal-title { font-size:13px; font-weight:600; min-width:132px; text-align:center; }
+  .cal-nav { background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:6px;
+             width:26px; height:26px; cursor:pointer; font-size:13px; line-height:1; }
+  .cal-nav:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .cal-nav:disabled { opacity:.3; cursor:default; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; max-width:520px; }
+  .cal-dow { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;
+             text-align:center; padding-bottom:2px; }
+  .cal-day { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:4px 5px 5px;
+             min-height:52px; display:flex; flex-direction:column; gap:3px; cursor:pointer;
+             color:var(--text); font-family:inherit; text-align:left; }
+  .cal-day.blank { visibility:hidden; }
+  .cal-day:disabled { cursor:default; opacity:.35; }
+  .cal-day:hover:not(:disabled) { border-color:var(--accent); }
+  .cal-day.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .cal-day.today .d { color:var(--accent); font-weight:700; }
+  .cal-day .d { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .cal-day .n { font-size:14px; font-variant-numeric:tabular-nums; line-height:1; }
+  .cal-day .n small { font-size:9px; color:var(--muted); margin-left:1px; }
+  .cal-day .split { display:flex; height:3px; border-radius:2px; overflow:hidden; margin-top:auto; background:var(--border); }
+  .cal-day .split i { display:block; }
+  .cal-day .split i.held { background:var(--buy); }
+  .cal-day .split i.faded { background:var(--hold); }
+  .cal-day .split i.gave { background:var(--sell); }
+  .cal-day .pend { font-size:9px; color:var(--hold); }
+  .cal-legend { display:flex; gap:12px; flex-wrap:wrap; align-items:center; font-size:11px; color:var(--muted); margin-top:8px; }
+  .cal-legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+</style>
+<style>
+  .add-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .add-row input[type=text] { width:120px; text-transform:uppercase; }
+  .src-pill { font-size:10px; padding:1px 6px; border-radius:999px; border:1px solid var(--border); color:var(--muted); }
+  .basis { font-size:11px; color:var(--muted); margin-top:2px; }
+  .basis.fallback { color:var(--hold); }
+  .btn2.seg { border:1px solid var(--border); }
+  .btn2.seg.on { border-color:var(--accent); color:var(--accent); }
+  td.company { max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+  /* Action buttons pin to the right edge. Adding the Company column pushed
+     this table 170px past the viewport at 1440, which is exactly how the
+     movers table's "+ Watch" button became unreachable earlier. */
+  td.actions, th.actions {
+    position:sticky; right:0; background:var(--surface); white-space:nowrap;
+    box-shadow:-8px 0 8px -8px rgba(0,0,0,.6);
+  }
+  tr:hover td.actions { background:var(--surface2); }
+  td.actions button + button { margin-left:6px; }
+  /* The headline is context, not the point of the row -- cap it so it cannot
+     stretch the table the way the scanner's announcement column did. */
+  .hl { display:inline-block; vertical-align:middle; max-width:200px; overflow:hidden;
+        text-overflow:ellipsis; white-space:nowrap; }
+  /* Direction flash on a changing cell, as a broker blotter does. Short and
+     low-saturation: this fires on every tick and must not strobe. */
+  @keyframes flash-up   { from { background:rgba(34,197,94,.32); } to { background:transparent; } }
+  @keyframes flash-down { from { background:rgba(239,68,68,.32); } to { background:transparent; } }
+  .flash-up   { animation:flash-up   .9s ease-out; }
+  .flash-down { animation:flash-down .9s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .flash-up, .flash-down { animation:none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance">Performance</a>
+    <a href="/asx">ASX</a>
+    <a href="/research">Patterns</a>
+    <a href="/swing">Swing</a>
+    <a href="/backtest">Backtest</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/watchlist" class="active">Watchlist</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>Watchlist</h2>
+    <p class="note">
+      Tickers pinned from the <a href="/scanner" style="color:var(--accent)">scanner</a> or the
+      <a href="/asx" style="color:var(--accent)">announcement feed</a>, with the day's prices and a
+      one-click hand-off into the paper-trade log. Adding something here records nothing and risks
+      nothing — it is a list of things to look at, kept apart from the trade log on purpose so it
+      can never distort that log's P&amp;L.
+      <br><br>
+      <strong id="quote-note">Prices are delayed</strong> — they come from the same daily bars the
+      scanner reads, so the two pages can never disagree with each other. <strong>Last</strong> is
+      the most recent trade, not a live quote. The quote source is a single swappable function
+      (<code>watchlist.get_quotes</code>), so pointing this at IBKR for live prices later changes
+      nothing above it.
+    </p>
+  </div>
+
+  <div class="bar">
+    <div class="add-row">
+      <input type="text" id="add-ticker" placeholder="Ticker" maxlength="6">
+      <button class="btn2" id="add-btn">Add to watchlist</button>
+    </div>
+    <button class="btn2 ghost" id="refresh">Refresh prices</button>
+    <button class="btn2 ghost" id="manual">Log a trade manually</button>
+    <span id="live-dot" class="note" title="Prices are pushed to this page as they change — no refresh needed. The underlying quotes are still ~20 min delayed; what is live is the delivery, not the price.">○ connecting…</span>
+    <span id="meta" class="note"></span>
+  </div>
+
+  <div class="card">
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th class="sortable" onclick="sortWatch('ticker')">Ticker <span class="sort-arrow">↕</span></th>
+          <th class="sortable" onclick="sortWatch('company')">Company <span class="sort-arrow">↕</span></th>
+          <th class="sortable" onclick="sortWatch('added')">Added <span class="sort-arrow">↕</span></th>
+          <th>Source</th>
+          <th class="num sortable" onclick="sortWatch('prev_close')">Prev close <span class="sort-arrow">↕</span></th>
+          <th class="num sortable" onclick="sortWatch('open')">Open <span class="sort-arrow">↕</span></th>
+          <th class="num sortable" onclick="sortWatch('high')">High <span class="sort-arrow">↕</span></th>
+          <th class="num sortable" onclick="sortWatch('low')">Low <span class="sort-arrow">↕</span></th>
+          <th class="num sortable" onclick="sortWatch('last')">Last <span class="sort-arrow">↕</span></th>
+          <th class="num sortable" onclick="sortWatch('move')">Move % <span class="sort-arrow">↕</span></th>
+          <th class="num sortable" onclick="sortWatch('ai')">AI <span class="sort-arrow">↕</span></th>
+          <th>Why</th>
+          <th class="actions"></th>
+        </tr></thead>
+        <tbody id="watch-body"><tr><td colspan="13" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Paper trades</h2>
+    <div class="bar" style="margin:0 0 12px">
+      <span class="note">Market:</span>
+      <button class="btn2 ghost seg on" data-market="all">All</button>
+      <button class="btn2 ghost seg" data-market="AU">ASX only</button>
+      <button class="btn2 ghost seg" data-market="US">US only</button>
+      <span class="note" id="trades-scope"></span>
+    </div>
+    <div class="grid4" id="summary" style="margin-bottom:14px"></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Ticker</th><th>Company</th><th>Source</th><th class="num">AI</th><th class="num">Conv</th><th class="num">Entry</th><th class="num">Shares</th><th class="num">Last</th>
+          <th class="num">P&amp;L %</th><th class="num">P&amp;L $</th><th class="num">Days</th>
+          <th>Status</th><th></th>
+        </tr></thead>
+        <tbody id="trades-body"><tr><td colspan="13" class="note">No paper trades yet.</td></tr></tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:12px">
+      Marked to market from daily closes. Nothing closes automatically - the exit is the decision
+      you are trying to learn, so the page will flag a breached stop or an elapsed hold and leave it
+      to you. Expect a <strong>median near zero with a few large winners</strong>: the measured payoff
+      was 46% positive with a 99th percentile of +88%, so a losing streak is the normal shape here,
+      not evidence it is broken.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Automated paper books</h2>
+    <p class="note" style="margin-bottom:12px">
+      Two timer-driven books, kept separate on purpose - they are different hypotheses and
+      pooling them destroys both records. <strong>Overnight</strong> buys the 15:45 volume
+      candidates at the close and exits at the next open. <strong>Gap reversion</strong> buys
+      frozen-cohort names that gapped down &gt;3%, entered mid-morning (not at the open - that
+      price is not tradeable on this signal) and exited at the same day's close.
+    </p>
+    <div class="bar" style="margin:0 0 12px">
+      <button class="btn2 ghost seg on" data-book="eod">Overnight</button>
+      <button class="btn2 ghost seg" data-book="gap">Gap reversion</button>
+      <span class="note" id="book-scope"></span>
+    </div>
+    <div class="grid4" id="book-summary" style="margin-bottom:14px"></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr id="book-head"></tr></thead>
+        <tbody id="book-body"><tr><td colspan="9" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<dialog id="trade-dialog">
+  <h3 style="font-size:15px;margin-bottom:4px">Open paper trade</h3>
+  <p class="note" id="dlg-sub"></p>
+  <label>Ticker</label><input type="text" id="dlg-ticker" placeholder="e.g. PNV">
+  <label>Entry price</label><input type="number" id="dlg-price" step="0.001">
+  <p class="basis" id="dlg-basis"></p>
+  <label>Position size (A$)</label><input type="number" id="dlg-dollars" step="100" value="20000">
+  <label>Stop (% below entry)</label><input type="number" id="dlg-stop" step="0.5" value="8">
+  <label>Planned hold (days)</label><input type="number" id="dlg-hold" step="1" value="10">
+  <label>Source</label>
+  <select id="dlg-source" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:13px;width:100%">
+    <option value="watchlist">Watchlist</option>
+    <option value="scanner">Scanner (mover)</option>
+    <option value="announcement">Announcement I read</option>
+    <option value="other">Other</option>
+  </select>
+  <label>AI score at entry (if any)</label><input type="number" id="dlg-ai" step="1" placeholder="0-100, blank if none">
+  <label>Your own conviction 1-5</label><input type="number" id="dlg-conv" step="1" min="1" max="5" placeholder="your read, independent of the AI">
+  <label>Note</label><input type="text" id="dlg-note" placeholder="why you took it">
+  <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+    <button class="btn2 ghost" id="dlg-cancel">Cancel</button>
+    <button class="btn2" id="dlg-ok">Open trade</button>
+  </div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(d);
+const cls = v => v > 0 ? 'pos' : (v < 0 ? 'neg' : '');
+const SYD_TZ = 'Australia/Sydney';
+function fmtSydney(iso, opts) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('en-AU', {
+      timeZone: SYD_TZ, day: '2-digit', month: 'short',
+      hour: '2-digit', minute: '2-digit', hour12: false, ...opts,
+    });
+  } catch (e) { return iso; }
+}
+
+let rows = [];
+let sortKey = null, sortAsc = false;
+
+const EXTRACT = {
+  ticker: r => r.ticker,
+  company: r => r.company,
+  added: r => r.added_at,
+  prev_close: r => r.quote && r.quote.prev_close,
+  open: r => r.quote && r.quote.open,
+  high: r => r.quote && r.quote.high,
+  low: r => r.quote && r.quote.low,
+  last: r => r.quote && r.quote.last,
+  move: r => r.quote && r.quote.move_pct,
+  ai: r => r.ai_score,
+};
+const NUMERIC = new Set(['prev_close', 'open', 'high', 'low', 'last', 'move', 'ai']);
+
+function sortWatch(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = (key === 'ticker'); }
+  document.querySelectorAll('th').forEach(th => th.classList.remove('sorted'));
+  if (event && event.currentTarget) event.currentTarget.classList.add('sorted');
+  render();
+}
+
+function render() {
+  let list = rows;
+  if (sortKey) {
+    const ex = EXTRACT[sortKey], numeric = NUMERIC.has(sortKey);
+    list = rows.slice().sort((a, b) => {
+      let av = ex(a), bv = ex(b);
+      if (numeric) {
+        // Missing quotes sink to the bottom either way rather than sorting as
+        // zero, which would read as a stock that fell to nothing.
+        av = (av === null || av === undefined || Number.isNaN(av)) ? (sortAsc ? Infinity : -Infinity) : av;
+        bv = (bv === null || bv === undefined || Number.isNaN(bv)) ? (sortAsc ? Infinity : -Infinity) : bv;
+        return sortAsc ? av - bv : bv - av;
+      }
+      return sortAsc ? String(av || '').localeCompare(String(bv || ''))
+                     : String(bv || '').localeCompare(String(av || ''));
+    });
+  }
+  if (!list.length) {
+    $('#watch-body').innerHTML = '<tr><td colspan="13" class="note">Nothing on the watchlist yet — add a ticker above, or use “+ Watch” on the scanner or announcements page.</td></tr>';
+    return;
+  }
+  $('#watch-body').innerHTML = list.map(r => {
+    const q = r.quote;
+    const why = r.headline
+      ? (r.url ? `<a href="${r.url}" target="_blank" rel="noopener" class="hl" style="color:var(--accent)">${r.headline}</a>`
+               : `<span class="hl">${r.headline}</span>`)
+      : '<span class="note">—</span>';
+    // A row with no quote is shown, not hidden: a delisted or mistyped ticker
+    // should be visible so it can be removed, not silently vanish.
+    const cells = q
+      ? `<td class="num" data-q="${r.ticker}|prev_close">${fmt(q.prev_close, 3)}</td>
+         <td class="num" data-q="${r.ticker}|open">${fmt(q.open, 3)}</td>
+         <td class="num" data-q="${r.ticker}|high">${fmt(q.high, 3)}</td>
+         <td class="num" data-q="${r.ticker}|low">${fmt(q.low, 3)}</td>
+         <td class="num" data-q="${r.ticker}|last"><strong>${fmt(q.last, 3)}</strong></td>
+         <td class="num ${cls(q.move_pct)}" data-q="${r.ticker}|move_pct">${fmt(q.move_pct)}</td>`
+      : `<td class="num note" colspan="6">no quote</td>`;
+    return `<tr>
+      <td><strong>${r.ticker}</strong></td>
+      <td class="company" title="${(r.company || '').replace(/"/g, '&quot;')}">${r.company || '<span class="note">—</span>'}</td>
+      <td class="note">${fmtSydney(r.added_at)}</td>
+      <td><span class="src-pill">${r.source || '—'}</span></td>
+      ${cells}
+      <td class="num">${r.ai_score ?? '—'}</td>
+      <td>${why}</td>
+      <td class="actions">
+        <button class="btn2" data-trade="${r.ticker}">Trade</button>
+        <button class="btn2 ghost" data-remove="${r.ticker}" title="Remove from watchlist">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.querySelectorAll('[data-trade]').forEach(b => b.onclick = () => openTrade(b.dataset.trade));
+  document.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => {
+    await fetch('/api/watchlist/' + encodeURIComponent(b.dataset.remove), { method: 'DELETE' });
+    load();
+  });
+}
+
+let tradesData = null;
+let tradesMarket = 'all';
+
+async function loadTrades() {
+  const r = await fetch('/api/scanner/trades');
+  if (!r.ok) return;
+  tradesData = await r.json();
+  renderTrades();
+}
+
+function renderTrades() {
+  const d = tradesData;
+  if (!d) return;
+  // Filter client-side: the API returns everything and the set is small, so a
+  // round trip per toggle would be pure latency. Rows with no market recorded
+  // (logged before the column existed) count as AU, matching how the price
+  // path treats them.
+  const keep = t => tradesMarket === 'all' || (t.market || 'AU') === tradesMarket;
+  const openRows = (d.open || []).filter(keep);
+  const closedRows = (d.closed || []).filter(keep);
+  // The summary is recomputed from the FILTERED rows rather than reusing the
+  // API's all-markets figures -- showing "8 open" above a table listing 3
+  // would be worse than useless.
+  const realised = closedRows.map(t => t.pnl_pct).filter(v => v != null);
+  const wins = realised.filter(v => v > 0).length;
+  const med = arr => {
+    if (!arr.length) return null;
+    const a = [...arr].sort((x, y) => x - y), m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  };
+  const dollarsAll = closedRows.map(t => t.pnl_dollars).filter(v => v != null)
+    .concat(openRows.map(t => t.unrealised_dollars).filter(v => v != null));
+  const s = {
+    n_open: openRows.length, n_closed: closedRows.length,
+    win_rate_pct: realised.length ? 100 * wins / realised.length : null,
+    avg_pnl_pct: realised.length ? realised.reduce((a, b) => a + b, 0) / realised.length : null,
+    median_pnl_pct: med(realised),
+    total_pnl_dollars: dollarsAll.length ? dollarsAll.reduce((a, b) => a + b, 0) : null,
+  };
+  const nAll = (d.open || []).length + (d.closed || []).length;
+  const nShown = openRows.length + closedRows.length;
+  $('#trades-scope').textContent = tradesMarket === 'all'
+    ? `${nAll} trade${nAll === 1 ? '' : 's'}`
+    : `${nShown} of ${nAll} trades`;
+  $('#summary').innerHTML = [
+    ['Open', s.n_open ?? 0, ''], ['Closed', s.n_closed ?? 0, ''],
+    ['Win rate', s.win_rate_pct != null ? fmt(s.win_rate_pct, 1) + '%' : '—', ''],
+    ['Avg P&L', s.avg_pnl_pct != null ? fmt(s.avg_pnl_pct) + '%' : '—', cls(s.avg_pnl_pct)],
+    ['Median P&L', s.median_pnl_pct != null ? fmt(s.median_pnl_pct) + '%' : '—', cls(s.median_pnl_pct)],
+    ['Total $', s.total_pnl_dollars != null ? fmt(s.total_pnl_dollars) : '—', cls(s.total_pnl_dollars)],
+  ].map(([k, v, c]) => `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+
+  const all = [...openRows, ...closedRows];
+  if (!all.length) { $('#trades-body').innerHTML = '<tr><td colspan="13" class="note">No paper trades yet.</td></tr>'; return; }
+  $('#trades-body').innerHTML = all.map(t => {
+    const open = t.status === 'open';
+    const pnlPct = open ? t.unrealised_pct : t.pnl_pct;
+    const pnlDol = open ? t.unrealised_dollars : t.pnl_dollars;
+    let flag = '';
+    if (open && t.stop_breached) flag = ' <span class="pill bad">stop hit</span>';
+    else if (open && t.hold_elapsed) flag = ' <span class="pill mv">hold elapsed</span>';
+    return `<tr>
+      <td><strong>${t.ticker}</strong>${t.market === 'US' ? ' <span class="pill mv" title="US-listed — marked to market from the bare symbol, not .AX">US</span>' : ''}${flag}<div class="note">${t.note || ''}</div></td>
+      <td class="company" title="${(t.company || '').replace(/"/g, '&quot;')}">${t.company || '<span class="note">—</span>'}</td>
+      <td class="note">${(t.setup && t.setup.source) || '—'}</td>
+      <td class="num">${(t.setup && t.setup.ai_score_at_entry != null) ? t.setup.ai_score_at_entry : '—'}</td>
+      <td class="num">${(t.setup && t.setup.conviction != null) ? t.setup.conviction : '—'}</td>
+      <td class="num">${fmt(t.entry_price, 3)}</td>
+      <td class="num">${t.shares}</td>
+      <td class="num">${open ? fmt(t.last_price, 3) : fmt(t.exit_price, 3)}</td>
+      <td class="num ${cls(pnlPct)}">${fmt(pnlPct)}</td>
+      <td class="num ${cls(pnlDol)}">${fmt(pnlDol)}</td>
+      <td class="num">${t.days_held ?? '—'}</td>
+      <td>${open ? 'open' : 'closed (' + (t.exit_reason || '') + ')'}</td>
+      <td>${open ? `<button class="btn2 ghost" data-close="${t.id}" data-last="${t.last_price ?? ''}">Close</button>` : ''}</td>
+    </tr>`;
+  }).join('');
+  document.querySelectorAll('[data-close]').forEach(b => b.onclick = async () => {
+    const px = prompt('Exit price', b.dataset.last || '');
+    if (!px) return;
+    const res = await fetch(`/api/scanner/trades/${b.dataset.close}/close`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ exit_price: parseFloat(px), reason: 'manual' }),
+    });
+    if (!res.ok) { alert('Could not close: ' + (await res.text())); return; }
+    loadTrades();
+  });
+}
+
+document.querySelectorAll('.seg[data-market]').forEach(b => b.onclick = () => {
+  tradesMarket = b.dataset.market;
+  document.querySelectorAll('.seg[data-market]').forEach(x => x.classList.toggle('on', x === b));
+  renderTrades();
+});
+
+async function load() {
+  const r = await fetch('/api/watchlist');
+  if (!r.ok) { $('#watch-body').innerHTML = '<tr><td colspan="12" class="note">Failed to load.</td></tr>'; return; }
+  const d = await r.json();
+  rows = d.items || [];
+  $('#meta').textContent = `${rows.length} on watchlist · ${d.n_quoted} quoted · ${d.quote_source}`;
+  render();
+}
+
+async function openTrade(ticker) {
+  const row = rows.find(r => r.ticker === ticker);
+  $('#dlg-sub').textContent = `${ticker} — fetching quote…`;
+  $('#dlg-ticker').value = ticker;
+  $('#dlg-price').value = '';
+  $('#dlg-basis').textContent = '';
+  $('#dlg-dollars').value = 20000;
+  $('#dlg-source').value = 'watchlist';
+  $('#dlg-ai').value = (row && row.ai_score != null) ? row.ai_score : '';
+  // Conviction and note are deliberately left blank -- they are the user's own
+  // read, and prefilling them would defeat the point of recording them.
+  $('#dlg-conv').value = '';
+  $('#dlg-note').value = '';
+  currentSetup = row ? { watchlist_source: row.source, headline: row.headline, url: row.url } : null;
+  $('#trade-dialog').showModal();
+
+  const r = await fetch('/api/watchlist/quote/' + encodeURIComponent(ticker));
+  if (!r.ok) { $('#dlg-sub').textContent = `${ticker} — quote unavailable, enter a price manually.`; return; }
+  const q = await r.json();
+  if (q.entry_price != null) $('#dlg-price').value = q.entry_price;
+  $('#dlg-sub').textContent = `${ticker} — last ${fmt(q.last, 3)}`;
+  const el = $('#dlg-basis');
+  if (q.entry_basis === 'ask') {
+    el.className = 'basis';
+    // Say the ask is delayed. It is a real offer, but a ~20-minute-old one --
+    // presenting it as the current offer would overstate what it is.
+    el.textContent = `Prefilled from the ask (${fmt(q.ask, 3)}) — delayed ~20 min, not a live quote.`;
+  } else {
+    // Say so out loud, rather than passing a last trade off as an offer. The
+    // usual reason is the pre-open auction (07:00-10:00 Sydney), where the
+    // book is legitimately crossed and the ask is only an indicative level.
+    el.className = 'basis fallback';
+    el.textContent = `No usable ask right now (${q.bid != null ? `book ${fmt(q.bid, 3)}/${fmt(q.ask, 3)}` : q.quote_source}) — prefilled from the last trade. Check it before logging.`;
+  }
+  if (currentSetup) currentSetup.quote_at_entry = q;
+}
+
+let currentSetup = null;
+
+// ---- live quote stream ----------------------------------------------------
+// Prices are pushed over SSE rather than polled, so the page updates without a
+// refresh. The numbers are still the ~20-minute delayed source -- what is live
+// here is the DELIVERY, not the price. The badge says exactly that rather than
+// implying a real-time feed the data source cannot provide.
+let es = null, streamOk = false;
+
+function applyQuotes(quotes) {
+  let needsRebuild = false;
+  for (const [ticker, q] of Object.entries(quotes || {})) {
+    const row = rows.find(r => r.ticker === ticker);
+    // A ticker that had no quote (or is newly added) has no cells to update.
+    if (!row || !row.quote) { needsRebuild = true; }
+    if (row) row.quote = q;
+    for (const [field, digits] of [['prev_close',3],['open',3],['high',3],['low',3],['last',3],['move_pct',2]]) {
+      const td = document.querySelector(`[data-q="${CSS.escape(ticker)}|${field}"]`);
+      if (!td) { needsRebuild = true; continue; }
+      const next = fmt(q[field], digits);
+      const prev = td.textContent.trim();
+      if (prev === next) continue;
+      td.innerHTML = field === 'last' ? `<strong>${next}</strong>` : next;
+      if (field === 'move_pct') td.className = 'num ' + cls(q.move_pct);
+      // Flash the direction of the change, the way a broker blotter does.
+      const up = parseFloat(next) > parseFloat(prev);
+      td.classList.remove('flash-up', 'flash-down');
+      void td.offsetWidth;                    // restart the animation
+      td.classList.add(up ? 'flash-up' : 'flash-down');
+    }
+  }
+  if (needsRebuild) load();
+}
+
+function startStream() {
+  if (!window.EventSource) return;           // fall back to the poll below
+  es = new EventSource('/api/watchlist/stream');
+  es.addEventListener('hello', () => { streamOk = true; setLive(true); });
+  es.addEventListener('update', ev => {
+    const d = JSON.parse(ev.data);
+    applyQuotes(d.quotes);
+    if ((d.removed || []).length) load();
+    setLive(true);
+  });
+  es.onerror = () => {
+    // EventSource reconnects on its own; just reflect the state so a silent
+    // stall is visible instead of the page looking merely quiet.
+    setLive(false);
+  };
+}
+
+function setLive(on) {
+  const el = $('#live-dot');
+  if (!el) return;
+  el.textContent = on ? '● live' : '○ reconnecting…';
+  el.style.color = on ? 'var(--buy)' : 'var(--hold)';
+}
+
+$('#refresh').onclick = load;
+$('#manual').onclick = () => {
+  // A trade you took for a reason that never passed through the watchlist --
+  // an announcement you read, a tip, whatever. Same dialog, nothing prefilled.
+  currentSetup = null;
+  $('#dlg-sub').textContent = 'Manual entry — for something you decided on outside this list.';
+  $('#dlg-basis').textContent = '';
+  $('#dlg-ticker').value = ''; $('#dlg-price').value = '';
+  $('#dlg-dollars').value = 20000;
+  $('#dlg-source').value = 'announcement';
+  $('#dlg-ai').value = ''; $('#dlg-conv').value = ''; $('#dlg-note').value = '';
+  $('#trade-dialog').showModal();
+};
+$('#add-btn').onclick = async () => {
+  const t = ($('#add-ticker').value || '').trim().toUpperCase();
+  if (!t) return;
+  const r = await fetch('/api/watchlist', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticker: t, source: 'manual' }),
+  });
+  if (!r.ok) { alert('Could not add: ' + (await r.text())); return; }
+  $('#add-ticker').value = '';
+  load();
+};
+$('#add-ticker').addEventListener('keydown', e => { if (e.key === 'Enter') $('#add-btn').click(); });
+
+$('#dlg-cancel').onclick = () => $('#trade-dialog').close();
+$('#dlg-ok').onclick = async () => {
+  const ticker = ($('#dlg-ticker').value || '').trim().toUpperCase();
+  if (!ticker) { alert('Ticker is required'); return; }
+  const price = parseFloat($('#dlg-price').value);
+  if (!price) { alert('Entry price is required'); return; }
+  const body = {
+    ticker: ticker,
+    entry_price: price,
+    dollars: parseFloat($('#dlg-dollars').value),
+    stop_pct: parseFloat($('#dlg-stop').value),
+    hold_days: parseInt($('#dlg-hold').value, 10),
+    note: $('#dlg-note').value || null,
+    setup: Object.assign({}, currentSetup || {}, {
+      source: $('#dlg-source').value,
+      ai_score_at_entry: $('#dlg-ai').value ? parseInt($('#dlg-ai').value, 10) : null,
+      conviction: $('#dlg-conv').value ? parseInt($('#dlg-conv').value, 10) : null,
+    }),
+  };
+  const r = await fetch('/api/scanner/trades', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!r.ok) { alert('Could not open: ' + (await r.text())); return; }
+  $('#trade-dialog').close();
+  loadTrades();
+};
+
+// ── Automated paper books ───────────────────────────────────────────────
+let BOOK = 'eod';
+const BOOK_COLS = {
+  eod: [['Date','scan_date'],['Ticker','ticker'],['Vol x','vol_ratio','n1'],
+        ['Entry','entry_price','n3'],['Exit','exit_price','n3'],
+        ['Overnight %','overnight_pct','pct'],['vs mkt %','_rel','pct'],
+        ['P&L $','pnl_dollars','n2'],['Status','_status']],
+  gap: [['Date','trade_date'],['Ticker','ticker'],['Gap %','gap_pct','pct'],
+        ['Entry','entry_price','n3'],['Entry bar','entry_bar_ts','time'],
+        ['Exit','exit_price','n3'],['Return %','return_pct','pct'],
+        ['vs mkt %','_rel','pct'],['P&L $','pnl','n2']],
+};
+
+function bcell(row, key, kind) {
+  let v = key.startsWith('_') ? null : row[key];
+  if (key === '_status') return row.exit_price != null ? 'closed' : 'open';
+  if (key === '_rel') {
+    const r = row.return_pct != null ? row.return_pct : row.overnight_pct;
+    const m = row.mkt_day_pct != null ? row.mkt_day_pct : row.mkt_overnight_pct;
+    v = (r != null && m != null) ? r - m : null;
+  }
+  if (v == null) return '—';
+  if (kind === 'pct') return `${v > 0 ? '+' : ''}${Number(v).toFixed(2)}%`;
+  if (kind === 'n1') return Number(v).toFixed(1);
+  if (kind === 'n2') return Number(v).toFixed(2);
+  if (kind === 'n3') return Number(v).toFixed(3);
+  // Entry bar timestamps carry the ~20min data lag; showing the clock time is
+  // the whole point of storing it, so render it rather than the full ISO.
+  if (kind === 'time') return String(v).slice(11, 16);
+  return v;
+}
+
+async function loadBooks() {
+  const cols = BOOK_COLS[BOOK];
+  document.getElementById('book-head').innerHTML =
+    cols.map(([label, , kind]) =>
+      `<th class="${kind && kind !== 'time' ? 'num' : ''}">${label}</th>`).join('');
+  try {
+    const url = BOOK === 'eod' ? '/api/eod/book?days=90' : '/api/gap-reversion/book?days=180';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const rows = data.trades || data.positions || data.rows || [];
+
+    let stats;
+    if (BOOK === 'gap') {
+      // Cohorts are reported separately by the API and must stay separate.
+      const sum = data.summary || {};
+      stats = Object.entries(sum).flatMap(([name, v]) => [
+        [`${name} closed`, v.n_closed ?? 0, ''],
+        [`${name} mean`, v.mean_return_pct != null ? fmt(v.mean_return_pct) + '%' : '—',
+         cls(v.mean_return_pct)],
+        [`${name} vs mkt`, v.mean_vs_market_pct != null ? fmt(v.mean_vs_market_pct) + '%' : '—',
+         cls(v.mean_vs_market_pct)],
+        [`${name} backtest`, v.backtest_expectation_pct != null
+          ? '+' + v.backtest_expectation_pct.toFixed(3) + '%' : '—', ''],
+      ]);
+    } else {
+      // The API already computes these, including the market-relative pair and
+      // the backtest expectation. Recomputing them in JS would give two
+      // answers to the same question and eventually disagree.
+      stats = [
+        ['Open', data.n_open ?? 0, ''],
+        ['Closed', data.n_closed ?? 0, ''],
+        ['Win rate', data.win_rate_pct != null ? fmt(data.win_rate_pct, 1) + '%' : '—', ''],
+        ['Mean overnight', data.mean_pct != null ? fmt(data.mean_pct) + '%' : '—', cls(data.mean_pct)],
+        ['Mean vs mkt', data.mean_vs_market_pct != null
+          ? fmt(data.mean_vs_market_pct) + '%' : '—', cls(data.mean_vs_market_pct)],
+        ['Backtest said', data.backtest_mean_pct != null
+          ? '+' + Number(data.backtest_mean_pct).toFixed(2) + '%' : '—', ''],
+        ['Total $', fmt(data.total_dollars), cls(data.total_dollars)],
+        ['Trades to signif.', data.trades_for_significance ?? '—', ''],
+      ];
+    }
+    document.getElementById('book-summary').innerHTML = stats.map(([k, v, c]) =>
+      `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+    document.getElementById('book-scope').textContent =
+      rows.length ? `${rows.length} booked` : 'nothing booked yet';
+
+    if (!rows.length) {
+      document.getElementById('book-body').innerHTML =
+        `<tr><td colspan="${cols.length}" class="note">No positions booked yet. `
+        + (BOOK === 'gap'
+           ? 'The scan runs 11:25 Sydney and only fires when a cohort name gaps down more than 3% '
+             + '- expect roughly 60 signals a year, so empty days are the norm.'
+           : 'The scan runs 15:45 Sydney.') + '</td></tr>';
+      return;
+    }
+    document.getElementById('book-body').innerHTML = rows.map(r => {
+      const key = BOOK === 'gap' ? 'return_pct' : 'overnight_pct';
+      const colour = new Set([key, '_rel', 'pnl_dollars', 'pnl']);
+      return '<tr>' + cols.map(([, k, kind]) => {
+        const t = bcell(r, k, kind);
+        const nm = kind && kind !== 'time' ? 'num' : '';
+        return `<td class="${nm} ${colour.has(k) ? cls(parseFloat(t)) : ''}">${t}</td>`;
+      }).join('') + '</tr>';
+    }).join('');
+  } catch (e) {
+    document.getElementById('book-body').innerHTML =
+      `<tr><td colspan="${cols.length}" class="note">Could not load: ${e.message}</td></tr>`;
+  }
+}
+
+document.querySelectorAll('[data-book]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-book]').forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+  BOOK = b.dataset.book;
+  loadBooks();
+});
+
+fetch('/api/auth/status').then(r => r.json()).then(a => {
+  if (a && a.authenticated) ['analysis', 'reports', 'sync', 'logout'].forEach(k => {
+    const el = document.getElementById(k + '-nav-link'); if (el) el.style.display = '';
+  });
+}).catch(() => {});
+
+load();
+loadTrades();
+loadBooks();
+startStream();
+// Slow safety net only. The stream carries price updates; this exists so row
+// membership and anything the stream missed still reconverge if the SSE
+// connection dies in a way EventSource does not retry out of.
+setInterval(load, 600000);
+</script>
+</body>
+</html>

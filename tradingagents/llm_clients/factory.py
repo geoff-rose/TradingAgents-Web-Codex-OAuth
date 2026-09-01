@@ -38,9 +38,13 @@ def create_llm_client(
     """
     provider_lower = provider.lower()
 
-    if provider_lower == "openai-codex":
-        from .openai_codex_client import OpenAICodexClient
-        return OpenAICodexClient(model, base_url, **kwargs)
+    if provider_lower == "hermes-claude":
+        from .hermes_claude_client import HermesClaudeClient
+        return HermesClaudeClient(model, base_url, **kwargs)
+
+    if provider_lower == "xai-grok":
+        from .xai_grok_client import XAIGrokClient
+        return XAIGrokClient(model, base_url, **kwargs)
 
     if provider_lower in _OPENAI_COMPATIBLE:
         from .openai_client import OpenAIClient

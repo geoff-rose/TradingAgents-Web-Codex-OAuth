@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Movers Scanner — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .section-note { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  section { margin-bottom: 36px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }
+
+  .universe-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .universe-chip {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;
+    user-select: none;
+  }
+  .universe-chip.on { border-color: var(--accent); }
+  .universe-chip input { accent-color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .pos { color: var(--buy); }
+  .neg { color: var(--sell); }
+  .neu { color: var(--muted); }
+
+  .btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { opacity: 0.85; color: #fff; }
+  .btn.danger:hover { border-color: var(--sell); color: var(--sell); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.proposed { background: rgba(245,158,11,0.15); color: var(--hold); }
+  .badge.submitted { background: rgba(56,139,253,0.15); color: var(--accent); }
+  .badge.open { background: rgba(34,197,94,0.15); color: var(--buy); }
+  .badge.closed { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .badge.rejected, .badge.error { background: rgba(239,68,68,0.15); color: var(--sell); }
+
+  .pnl-tiles { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .pnl-tile { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; min-width: 120px; }
+  .pnl-tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .pnl-tile .value { font-size: 18px; font-weight: 700; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  .msg { font-size: 12px; margin-top: 8px; }
+  .msg.err { color: var(--sell); }
+  .msg.ok { color: var(--buy); }
+  .rationale { color: var(--muted); font-size: 11px; max-width: 260px; white-space: normal; }
+</style>
+<style>
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 24px; }
+  .bar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); }
+  .pill.full { background:rgba(34,197,94,.15); color:var(--buy); border-color:rgba(34,197,94,.4); }
+  .pill.mv   { background:rgba(56,139,253,.15); color:var(--accent); border-color:rgba(56,139,253,.4); }
+  .pill.watch{ color:var(--muted); }
+  .pill.bad  { background:rgba(239,68,68,.12); color:var(--sell); border-color:rgba(239,68,68,.35); }
+  .pill.ok   { background:rgba(34,197,94,.12); color:var(--buy); border-color:rgba(34,197,94,.35); }
+  .pill.warn { background:rgba(245,158,11,.13); color:var(--hold); border-color:rgba(245,158,11,.4); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase;
+       letter-spacing:.04em; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th.sortable { cursor:pointer; user-select:none; }
+  th.sortable:hover { color:var(--text); }
+  th .sort-arrow { opacity:.4; font-size:10px; margin-left:2px; }
+  th.sorted .sort-arrow { opacity:1; color:var(--accent); }
+  td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tr:hover td { background:var(--surface2); }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pos { color:var(--buy); } .neg { color:var(--sell); }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:18px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:12px; font-weight:600; }
+  .note { font-size:12px; color:var(--muted); line-height:1.55; }
+  .btn2 { background:var(--accent); color:#fff; border:none; padding:5px 11px; border-radius:6px; cursor:pointer; font-size:12px; }
+  .btn2.ghost { background:transparent; border:1px solid var(--border); color:var(--muted); }
+  .btn2:disabled { opacity:.5; cursor:default; }
+  input[type=number], input[type=text] { background:var(--bg); border:1px solid var(--border); color:var(--text);
+       border-radius:6px; padding:5px 8px; font-size:13px; width:100%; }
+  /* inline-block, or the max-width is ignored (max-width does not apply to
+     non-replaced inline elements) and a long headline stretches the column --
+     it was running to 389px and pushing the table back into overflow. */
+  .hl { display:inline-block; vertical-align:middle; font-size:12px; color:var(--muted);
+        max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Header qualifiers stack under the label rather than widening the column.
+     Inline, "Move % (vs prev close)" alone was 160px. */
+  /* `th` is nowrap globally, which kept the qualifier on one unbreakable line
+     and sized the column to it -- Gap % was 135px wide for a 5-character
+     number. These wrap onto their own short lines instead. */
+  th.pct { white-space:normal; }
+  th .sub { display:block; white-space:normal; font-weight:400; text-transform:none;
+            letter-spacing:0; opacity:.7; line-height:1.25; font-size:10px; }
+  /* The action buttons pin to the right edge so they stay reachable however
+     wide the table gets. They were pushed out of view entirely when the
+     Prev close and Open columns were added (2026-08-25): the table measured
+     1428px against 1343px of visible width, leaving "+ Watch" at x=1459. */
+  td.actions, th.actions {
+    position:sticky; right:0; background:var(--surface); white-space:nowrap;
+    box-shadow:-8px 0 8px -8px rgba(0,0,0,.6);
+  }
+  tr:hover td.actions { background:var(--surface2); }
+  td.actions button + button { margin-left:6px; }
+  .grid4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .stat { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+  .stat .v { font-size:19px; font-variant-numeric:tabular-nums; }
+  .stat .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  dialog { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:20px; min-width:340px; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  label { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:10px 0 4px; }
+
+  /* Gap-outcomes calendar. A day cell is a button so keyboard focus and
+     :disabled do the work -- days with no logged movers are genuinely not
+     selectable, rather than looking clickable and doing nothing. */
+  .cal-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+  .cal-title { font-size:13px; font-weight:600; min-width:132px; text-align:center; }
+  .cal-nav { background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:6px;
+             width:26px; height:26px; cursor:pointer; font-size:13px; line-height:1; }
+  .cal-nav:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .cal-nav:disabled { opacity:.3; cursor:default; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; max-width:520px; }
+  .cal-dow { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;
+             text-align:center; padding-bottom:2px; }
+  .cal-day { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:4px 5px 5px;
+             min-height:52px; display:flex; flex-direction:column; gap:3px; cursor:pointer;
+             color:var(--text); font-family:inherit; text-align:left; }
+  .cal-day.blank { visibility:hidden; }
+  .cal-day:disabled { cursor:default; opacity:.35; }
+  .cal-day:hover:not(:disabled) { border-color:var(--accent); }
+  .cal-day.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .cal-day.today .d { color:var(--accent); font-weight:700; }
+  .cal-day .d { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .cal-day .n { font-size:14px; font-variant-numeric:tabular-nums; line-height:1; }
+  .cal-day .n small { font-size:9px; color:var(--muted); margin-left:1px; }
+  .cal-day .split { display:flex; height:3px; border-radius:2px; overflow:hidden; margin-top:auto; background:var(--border); }
+  .cal-day .split i { display:block; }
+  .cal-day .split i.held { background:var(--buy); }
+  .cal-day .split i.faded { background:var(--hold); }
+  .cal-day .split i.gave { background:var(--sell); }
+  .cal-day .pend { font-size:9px; color:var(--hold); }
+  /* A day with no confirmed closes yet -- selectable, but visibly unsettled. */
+  .cal-day.live { border-style:dashed; }
+  .cal-day.live .n { color:var(--hold); }
+  .btn2.seg { border:1px solid var(--border); }
+  .btn2.seg.on { border-color:var(--accent); color:var(--accent); }
+  .btn2.seg2 { border:1px solid var(--border); }
+  .btn2.seg2.on { border-color:var(--accent); color:var(--accent); }
+  .cal-legend { display:flex; gap:12px; flex-wrap:wrap; align-items:center; font-size:11px; color:var(--muted); margin-top:8px; }
+  .cal-legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance">Performance</a>
+    <a href="/asx">ASX</a>
+    <a href="/research">Patterns</a>
+    <a href="/swing">Swing</a>
+    <a href="/backtest">Backtest</a>
+    <a href="/scanner" class="active">Scanner</a>
+    <a href="/watchlist">Watchlist</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>What this looks for</h2>
+    <p class="note">
+      A move of <strong>+8% or more</strong> on <strong>3x normal volume</strong>, with an
+      announcement to explain it. Those thresholds are measured, not chosen: below +8% volume
+      carried <em>no</em> continuation information, and the forward-return gradient only separates
+      from the no-news bucket at 3x and above. The historical edge showed up over
+      <strong>3-10 days, never next-day</strong> - every volume bucket was negative at 1 day.
+      <br><br>
+      <strong>Both percentages are measured from the previous close</strong>, not from the open.
+      <em>Move %</em> is last vs prev close — the whole move. <em>Gap %</em> is the open vs prev
+      close — the part that was already there at the opening auction, before any intraday trading.
+      <em>Move % vs open</em> is last vs the open — what is left once the gap has already happened,
+      and the live version of the Open→Close % in the gap-outcomes table below.
+      So a row with Move 12%, Gap 11% and Move-vs-open ~0% barely budged once the market opened;
+      one with Move 12%, Gap 0% and Move-vs-open 12% did all of it during the session. Prev close, Open and Last are all shown so the
+      arithmetic is checkable.
+      <br><br>
+      <strong>Nothing here is proven tradeable.</strong> Where the effect was strongest (under 50c)
+      the round-trip spread exceeded it; in the one band where costs were low enough (50c-$2) it was
+      not statistically distinguishable from buying any mover. Rows are flagged by price band so the
+      uneconomic ones stay visible rather than hidden. This page exists so you can watch it live and
+      form your own view - and unlike every backtest here, a live scan has no survivorship bias.
+    </p>
+  </div>
+
+  <div class="bar">
+    <button class="btn2" id="refresh">Refresh scan</button>
+    <span id="meta" class="note"></span>
+  </div>
+
+  <div class="card">
+    <h2>End-of-day volume — overnight hold candidates</h2>
+    <p class="note" style="margin-bottom:10px">
+      Names trading well above their normal volume for this point in the session. Measured over
+      2 years of hourly bars on the top 500: buying the closing auction and selling the next
+      <strong>opening</strong> auction returned <strong>~+0.19%</strong> per night unconditionally,
+      and <strong>~+0.34%</strong> when the stock ran &gt;6x normal volume — 8 of 9 quarters
+      positive, and not driven by a few outliers.
+      <br><br>
+      <strong>The exit is the next open, not later.</strong> Selling at 11:00 instead gives back
+      69% of the gain, and the win rate falls to a coin flip. Two auction fills, nothing between.
+      <br><br>
+      The ratio compares today's volume so far against the <em>same hours</em> of the previous 20
+      sessions, so it means the same thing whenever you look — but only after 15:00 is it the
+      statistic the strategy was actually measured on. Before then it is a live preview.
+      <strong>+0.34% per night is small</strong>: a daily round trip has to cost less than that,
+      and ~21% of these historically do not move overnight at all.
+    </p>
+    <div class="bar">
+      <button class="btn2 ghost" id="eod-refresh">Run scan</button>
+      <span class="note" id="eod-meta"></span>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Ticker</th><th>Company</th><th class="num">Vol x</th>
+          <th class="num">Last</th><th class="num">Move %</th><th class="actions"></th>
+        </tr></thead>
+        <tbody id="eod-body"><tr><td colspan="6" class="note">Not run yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Movers</h2>
+    <div style="overflow-x:auto">
+      <table id="movers">
+        <thead><tr>
+          <th class="sortable" onclick="sortMovers('setup')">Setup <span class="sort-arrow">&#8597;</span></th>
+          <th class="sortable" onclick="sortMovers('ticker')">Ticker <span class="sort-arrow">&#8597;</span></th>
+          <th class="num sortable" onclick="sortMovers('prev_close')" title="The previous session's closing price. Both percentages are measured FROM this.">Prev close <span class="sort-arrow">&#8597;</span></th>
+          <th class="num sortable" onclick="sortMovers('open')" title="Today's opening auction price.">Open <span class="sort-arrow">&#8597;</span></th>
+          <th class="num sortable" onclick="sortMovers('last')" title="Last traded price (~20 min delayed).">Last <span class="sort-arrow">&#8597;</span></th>
+          <th class="num pct sortable" onclick="sortMovers('move')" title="Last vs PREV CLOSE &#8212; the whole move including the overnight gap.">Move %<span class="sub">vs prev close</span> <span class="sort-arrow">&#8597;</span></th>
+          <th class="num pct sortable" onclick="sortMovers('move_open')" title="Last vs OPEN &#8212; what the stock has done since the opening auction, i.e. the part of the move still on offer once the gap had already happened.">Move %<span class="sub">vs open</span> <span class="sort-arrow">&#8597;</span></th>
+          <th class="num pct sortable" onclick="sortMovers('gap')" title="Open vs PREV CLOSE &#8212; how much of the move was already there at the opening auction, before a single intraday trade.">Gap %<span class="sub">open vs prev close</span> <span class="sort-arrow">&#8597;</span></th>
+          <th class="num sortable" onclick="sortMovers('vol')">Vol x <span class="sort-arrow">&#8597;</span></th>
+          <th class="sortable" onclick="sortMovers('band')">Band <span class="sort-arrow">&#8597;</span></th>
+          <th class="num sortable" onclick="sortMovers('ai')">AI <span class="sort-arrow">&#8597;</span></th>
+          <th class="sortable" onclick="sortMovers('news')">Announcement <span class="sort-arrow">&#8597;</span></th>
+          <th class="actions"></th>
+        </tr></thead>
+        <tbody id="movers-body"><tr><td colspan="13" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="note" id="scan-notes" style="margin-top:12px"></p>
+  </div>
+
+  <div class="card">
+    <h2>Gap outcomes — does the move hold past the open?</h2>
+    <p class="note" style="margin-bottom:12px">
+      Every mover the scanner has ever flagged is logged with its previous close, open, high and
+      close. A stock qualifies here on its move vs the <strong>previous close</strong> — this
+      answers whether it then actually held above its <strong>open</strong> by the end of the day,
+      or gapped up and drifted down giving the move back. Only <strong>finalized</strong> days count
+      (confirmed after the close by a 16:15 Sydney timer, not "last traded so far" mid-session).
+      <br><br>
+      <strong>News</strong> is how many announcements that company released for that session (⚡ = at
+      least one ASX price-sensitive flag), and <strong>AI score</strong> is the same 0-100 score the
+      ASX dashboard gave them — the <em>net</em> score across all of that company's announcements
+      for the session where one was computed, otherwise its most material single announcement.
+      Both are snapshotted at scan time, so they stay readable long after the announcement feed has
+      rolled off. A dash means no record; <em>none</em> means we looked and there was no announcement.
+    </p>
+    <div class="cal-head">
+      <button class="cal-nav" id="cal-prev" title="Previous month">&lsaquo;</button>
+      <span class="cal-title" id="cal-title">—</span>
+      <button class="cal-nav" id="cal-next" title="Next month">&rsaquo;</button>
+      <button class="btn2 ghost" id="cal-reset" style="margin-left:8px">Last 30 days</button>
+      <span class="note" id="cal-scope"></span>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+    <div class="cal-legend">
+      <span><i style="background:var(--buy)"></i>held above open</span>
+      <span><i style="background:var(--hold)"></i>gapped, then faded</span>
+      <span><i style="background:var(--sell)"></i>gave it all back</span>
+      <span>The big number is that day's finalized movers — click a day to see just that session.</span>
+    </div>
+
+    <div class="grid4" id="outcomes-summary" style="margin:14px 0 12px"></div>
+    <p class="note" id="outcomes-note"></p><span class="note" id="setup-scope"></span>
+    <div class="bar" style="margin:10px 0 0">
+      <span class="note">Horizon:</span>
+      <button class="btn2 ghost seg on" data-view="sameday">Same day</button>
+      <button class="btn2 ghost seg" data-view="forward">Forward returns</button>
+      <span class="note" style="margin-left:10px">Setup:</span>
+      <button class="btn2 ghost seg2 on" data-setup="all">All</button>
+      <button class="btn2 ghost seg2" data-setup="full">FULL</button>
+      <button class="btn2 ghost seg2" data-setup="move+vol">move+vol</button>
+      <button class="btn2 ghost seg2" data-setup="watch">watch</button>
+      <span class="note" id="view-note"></span>
+    </div>
+    <div style="overflow-x:auto; margin-top:10px">
+      <table>
+        <thead id="outcomes-head"></thead>
+        <tbody id="outcomes-body"><tr><td colspan="14" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<dialog id="trade-dialog">
+  <h3 style="font-size:15px;margin-bottom:4px">Open paper trade</h3>
+  <p class="note" id="dlg-sub"></p>
+  <label>Ticker</label><input type="text" id="dlg-ticker" placeholder="e.g. PNV">
+  <label>Entry price</label><input type="number" id="dlg-price" step="0.001">
+  <label>Position size (A$)</label><input type="number" id="dlg-dollars" step="100" value="20000">
+  <label>Stop (% below entry)</label><input type="number" id="dlg-stop" step="0.5" value="8">
+  <label>Planned hold (days)</label><input type="number" id="dlg-hold" step="1" value="10">
+  <label>Source</label>
+  <select id="dlg-source" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:13px;width:100%">
+    <option value="scanner">Scanner (mover)</option>
+    <option value="announcement">Announcement I read</option>
+    <option value="other">Other</option>
+  </select>
+  <label>AI score at entry (if any)</label><input type="number" id="dlg-ai" step="1" placeholder="0-100, blank if none">
+  <label>Your own conviction 1-5</label><input type="number" id="dlg-conv" step="1" min="1" max="5" placeholder="your read, independent of the AI">
+  <label>Note</label><input type="text" id="dlg-note" placeholder="why you took it">
+  <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+    <button class="btn2 ghost" id="dlg-cancel">Cancel</button>
+    <button class="btn2" id="dlg-ok">Open trade</button>
+  </div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(d);
+// ASX trades in Sydney time; every timestamp from the API is UTC. Convert at
+// the point of display rather than storing local time anywhere, so DST
+// (AEST/AEDT) is handled by the browser's own tz database instead of a fixed
+// +10/+11 offset that would silently go wrong twice a year.
+const SYD_TZ = 'Australia/Sydney';
+function fmtSydney(iso, opts) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('en-AU', {
+      timeZone: SYD_TZ, day: '2-digit', month: 'short',
+      hour: '2-digit', minute: '2-digit', hour12: false, ...opts,
+    });
+  } catch (e) { return iso; }
+}
+const cls = v => v > 0 ? 'pos' : (v < 0 ? 'neg' : '');
+let currentSetup = null;
+
+async function loadScan(force) {
+  $('#movers-body').innerHTML = '<tr><td colspan="13" class="note">Scanning…</td></tr>';
+  const r = await fetch('/api/scanner/scan' + (force ? '?force=true' : ''));
+  if (!r.ok) { $('#movers-body').innerHTML = '<tr><td colspan="13" class="note">Scan failed.</td></tr>'; return; }
+  const d = await r.json();
+  // Name the session the BARS are from, not just when the scan ran. A scan at
+  // 10:20 showing yesterday's bars is the failure mode this line exists to
+  // make visible rather than letting a stale +12% pass as live.
+  const bars = (d.bar_dates || []).join(', ');
+  // Name only the dates the STALE rows are on. Listing every bar_date read as
+  // "1 row still on 2026-08-24, 2026-08-25" when the scan straddled two days.
+  const staleDates = [...new Set((d.rows || []).filter(r => r.is_stale).map(r => r.bar_date))].join(', ');
+  const staleWarn = d.n_stale
+    ? ` · ⚠ ${d.n_stale} row${d.n_stale > 1 ? 's' : ''} still on ${staleDates} — today's bar not published yet`
+    : (bars && bars !== d.session_day ? ` · bars from ${bars}` : '');
+  $('#meta').innerHTML = `${d.n_rows} movers · session ${d.session_state} · scanned ${fmtSydney(d.scanned_at)} Sydney`
+    + (d.cached ? ' (cached)' : '') + staleWarn;
+  $('#scan-notes').innerHTML = `<strong>Volume:</strong> ${d.volume_ratio_note}<br><strong>Prices:</strong> ${d.price_note}`;
+  moverRows = d.rows || [];
+  renderMovers();
+}
+
+// The scan's own ordering stays the default -- FULL setups first, then
+// move+vol, then by move size. That ranking is the scanner's opinion and is
+// more useful than any single column until you ask for something else.
+let moverRows = [];
+let moverSortKey = null;
+let moverSortAsc = false;
+
+const MOVER_EXTRACT = {
+  setup: r => (r.full_setup ? 2 : ((r.meets_move && r.meets_volume) ? 1 : 0)),
+  ticker: r => r.ticker,
+  prev_close: r => r.prev_close, open: r => r.open, last: r => r.last,
+  move: r => r.move_pct, move_open: r => r.move_from_open_pct, gap: r => r.gap_pct,
+  vol: r => r.volume_ratio, ai: r => r.ai_score,
+  band: r => r.price_band, news: r => r.top_headline || '',
+};
+const MOVER_NUMERIC = new Set(['setup', 'prev_close', 'open', 'last', 'move',
+                               'move_open', 'gap', 'vol', 'ai']);
+
+function sortMovers(key) {
+  if (moverSortKey === key) { moverSortAsc = !moverSortAsc; }
+  else { moverSortKey = key; moverSortAsc = (key === 'ticker' || key === 'band' || key === 'news'); }
+  document.querySelectorAll('#movers thead th').forEach(th => th.classList.remove('sorted'));
+  if (typeof event !== 'undefined' && event && event.currentTarget) {
+    event.currentTarget.classList.add('sorted');
+  }
+  renderMovers();
+}
+
+function renderMovers() {
+  let rows = moverRows;
+  if (!rows.length) { $('#movers-body').innerHTML = '<tr><td colspan="13" class="note">No movers above the watch threshold.</td></tr>'; return; }
+  if (moverSortKey) {
+    const ex = MOVER_EXTRACT[moverSortKey], numeric = MOVER_NUMERIC.has(moverSortKey);
+    rows = rows.slice().sort((a, b) => {
+      let av = ex(a), bv = ex(b);
+      if (numeric) {
+        // Missing values sink either way rather than sorting as zero, which
+        // would read as a stock that did not move.
+        av = (av == null || Number.isNaN(av)) ? (moverSortAsc ? Infinity : -Infinity) : av;
+        bv = (bv == null || Number.isNaN(bv)) ? (moverSortAsc ? Infinity : -Infinity) : bv;
+        return moverSortAsc ? av - bv : bv - av;
+      }
+      return moverSortAsc ? String(av || '').localeCompare(String(bv || ''))
+                          : String(bv || '').localeCompare(String(av || ''));
+    });
+  }
+  $('#movers-body').innerHTML = rows.map(r => {
+    const setup = r.full_setup ? '<span class="pill full">FULL</span>'
+      : (r.meets_move && r.meets_volume ? '<span class="pill mv">move+vol</span>' : '<span class="pill watch">watch</span>');
+    const bandCls = r.cost_verdict && r.cost_verdict.startsWith('edge survived') ? 'ok' : 'bad';
+    const ann = r.top_headline
+      ? `<a href="${r.announcement_url || '#'}" target="_blank" rel="noopener" class="hl" style="color:var(--accent)">${r.top_headline}</a>`
+      : '<span class="note">—</span>';
+    return `<tr>
+      <td>${setup}</td>
+      <td><strong>${r.ticker}</strong><div class="note" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.company || ''}</div></td>
+      <td class="num">${fmt(r.prev_close, 3)}</td>
+      <td class="num">${fmt(r.open, 3)}</td>
+      <td class="num">${fmt(r.last, 3)}</td>
+      <td class="num ${cls(r.move_pct)}" title="(${fmt(r.last, 3)} − ${fmt(r.prev_close, 3)}) ÷ ${fmt(r.prev_close, 3)} × 100">${fmt(r.move_pct)}${r.is_stale ? ' <span class="pill bad" title="This is the ' + r.bar_date + ' session, not today — the data provider has not published today&apos;s bar yet.">stale</span>' : ''}</td>
+      <td class="num ${cls(r.move_from_open_pct)}" title="(${fmt(r.last, 3)} − ${fmt(r.open, 3)}) ÷ ${fmt(r.open, 3)} × 100">${fmt(r.move_from_open_pct)}</td>
+      <td class="num ${cls(r.gap_pct)}" title="(${fmt(r.open, 3)} − ${fmt(r.prev_close, 3)}) ÷ ${fmt(r.prev_close, 3)} × 100">${fmt(r.gap_pct)}</td>
+      <td class="num">${fmt(r.volume_ratio, 1)}</td>
+      <td><span class="pill ${bandCls}" title="${r.cost_verdict}">${r.price_band}</span></td>
+      <td class="num">${r.ai_score ?? '—'}</td>
+      <td>${ann}</td>
+      <td class="actions">
+        <button class="btn2" data-t="${r.ticker}" data-p="${r.last}">Paper trade</button>
+        <button class="btn2 ghost" data-watch="${r.ticker}" title="Add to watchlist">+ Watch</button>
+      </td>
+    </tr>`;
+  }).join('');
+  document.querySelectorAll('#movers-body button[data-t]').forEach(b => b.onclick = () => {
+    currentSetup = moverRows.find(x => x.ticker === b.dataset.t) || null;
+    $('#dlg-sub').textContent = `${b.dataset.t} — last ${b.dataset.p}`;
+    $('#dlg-ticker').value = b.dataset.t;
+    $('#dlg-price').value = b.dataset.p;
+    $('#dlg-source').value = 'scanner';
+    $('#dlg-ai').value = (currentSetup && currentSetup.ai_score != null) ? currentSetup.ai_score : '';
+    $('#trade-dialog').showModal();
+  });
+  document.querySelectorAll('#movers-body button[data-watch]').forEach(b => b.onclick = () => {
+    const row = moverRows.find(x => x.ticker === b.dataset.watch) || {};
+    addToWatchlist(b, {
+      ticker: b.dataset.watch, company: row.company, source: 'scanner',
+      ai_score: row.ai_score ?? null, headline: row.top_headline || null,
+      url: row.announcement_url || null,
+    });
+  });
+}
+
+// Shared by both "+ Watch" buttons on this page. Confirms on the button itself
+// rather than with an alert -- adding a watchlist entry is cheap and
+// reversible, so interrupting the scan-reading flow for it would be noise.
+async function addToWatchlist(btn, payload) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/watchlist', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    btn.textContent = d.added ? '✓ Watching' : '✓ Updated';
+  } catch (e) {
+    btn.textContent = '✕ failed';
+    btn.title = String(e.message || e);
+  }
+  setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2500);
+}
+
+let outcomesRows = [];
+let outcomesSortKey = null;   // null = natural API order (most recent first)
+let outcomesSortAsc = false;
+
+const OUTCOMES_RANK = { above_open: 2, above_prev_close_only: 1, at_or_below_prev_close: 0, unresolved: -1 };
+const OUTCOMES_EXTRACTORS = {
+  date: r => r.trade_date, ticker: r => r.ticker,
+  setup: r => (r.full_setup ? 2 : (r.meets_move && r.meets_volume ? 1 : 0)),
+  prev_close: r => r.prev_close, open: r => r.open, high: r => r.high,
+  low: r => r.low, close: r => r.close,
+  gap: r => 100 * (r.open - r.prev_close) / r.prev_close,
+  oc: r => r.close != null ? 100 * (r.close - r.open) / r.open : null,
+  oh: r => (r.high != null && r.open) ? 100 * (r.high - r.open) / r.open : null,
+  // Sort on the market-relative figure, which is what the cell displays.
+  f1: r => (r.fwd_1d_pct == null ? null : r.fwd_1d_pct - (r.mkt_1d_pct || 0)),
+  f3: r => (r.fwd_3d_pct == null ? null : r.fwd_3d_pct - (r.mkt_3d_pct || 0)),
+  f5: r => (r.fwd_5d_pct == null ? null : r.fwd_5d_pct - (r.mkt_5d_pct || 0)),
+  f10: r => (r.fwd_10d_pct == null ? null : r.fwd_10d_pct - (r.mkt_10d_pct || 0)),
+  mfe: r => r.mfe_10d_pct,
+  mae: r => r.mae_10d_pct,
+  news: r => r.n_announcements,
+  ai: r => r.ai_score,
+  outcome: r => OUTCOMES_RANK[_outcomeKey(r)],
+};
+const OUTCOMES_NUMERIC = new Set(['prev_close', 'open', 'high', 'low', 'close', 'gap', 'oc',
+                                  'oh', 'news', 'ai', 'outcome', 'setup',
+                                  'f1', 'f3', 'f5', 'f10', 'mfe', 'mae']);
+
+function _outcomeKey(row) {
+  if (row.close == null) return 'unresolved';
+  if (row.close > row.open) return 'above_open';
+  if (row.close > row.prev_close) return 'above_prev_close_only';
+  return 'at_or_below_prev_close';
+}
+
+function sortOutcomes(key) {
+  if (outcomesSortKey === key) { outcomesSortAsc = !outcomesSortAsc; }
+  else { outcomesSortKey = key; outcomesSortAsc = key === 'ticker' || key === 'date'; }
+  renderOutcomesTable();   // re-renders the head too, carrying the sorted marker
+}
+
+// Columns are declared once and drive the header, the body and the colspan
+// together. Keeping them as three hand-maintained lists is what produced a
+// string of off-by-one column bugs earlier in this work.
+const OUTCOMES_VIEWS = {
+  sameday: [
+    ['setup', 'Setup', '', r => setupPill(r)],
+    ['date', 'Date', '', r => `<span class="time">${r.trade_date}</span>`],
+    ['ticker', 'Ticker', '', r => `<strong>${r.ticker}</strong>`],
+    ['prev_close', 'Prev close', 'num', r => fmt(r.prev_close, 3)],
+    ['open', 'Open', 'num', r => fmt(r.open, 3)],
+    ['high', 'High', 'num', r => fmt(r.high, 3)],
+    ['low', 'Low', 'num', r => fmt(r.low, 3)],
+    ['close', 'Close', 'num', r => (r.close != null ? fmt(r.close, 3) : '—') + livePill(r)],
+    ['gap', 'Gap %', 'num', r => pct(gapOf(r))],
+    ['oc', 'Open→<span class="sub">Close %</span>', 'num pct', r => pct(ocOf(r))],
+    ['oh', 'Open→<span class="sub">High %</span>', 'num pct', r => pct(ohOf(r))],
+    ['news', 'News', 'num', r => newsCell(r)],
+    ['ai', 'AI score', 'num', r => aiCell(r)],
+    ['outcome', 'Outcome', '', r => outcomePill(r)],
+  ],
+  forward: [
+    ['setup', 'Setup', '', r => setupPill(r)],
+    ['date', 'Date', '', r => `<span class="time">${r.trade_date}</span>`],
+    ['ticker', 'Ticker', '', r => `<strong>${r.ticker}</strong>`],
+    ['close', 'Entry<span class="sub">day close</span>', 'num pct', r => fmt(r.close, 3)],
+    ['oc', 'Open→<span class="sub">Close %</span>', 'num pct', r => pct(ocOf(r))],
+    ['f1', 'D+1', 'num', r => relCell(r, 1)],
+    ['f3', 'D+3', 'num', r => relCell(r, 3)],
+    ['f5', 'D+5', 'num', r => relCell(r, 5)],
+    ['f10', 'D+10', 'num', r => relCell(r, 10)],
+    ['mfe', 'MFE<span class="sub">best 10d</span>', 'num pct', r => pct(r.mfe_10d_pct)],
+    ['mae', 'MAE<span class="sub">worst 10d</span>', 'num pct', r => pct(r.mae_10d_pct)],
+    ['ai', 'AI score', 'num', r => aiCell(r)],
+    ['outcome', 'Outcome', '', r => outcomePill(r)],
+  ],
+};
+let outcomesView = 'sameday';
+
+const gapOf = r => 100 * (r.open - r.prev_close) / r.prev_close;
+const ocOf = r => r.close != null ? 100 * (r.close - r.open) / r.open : null;
+const ohOf = r => (r.high != null && r.open) ? 100 * (r.high - r.open) / r.open : null;
+const pct = v => (v == null || Number.isNaN(v)) ? '<span class="note">—</span>'
+                                                : `<span class="${cls(v)}">${fmt(v)}</span>`;
+function setupPill(row) {
+  return row.full_setup ? '<span class="pill full">FULL</span>'
+    : (row.meets_move && row.meets_volume ? '<span class="pill mv">move+vol</span>'
+                                          : '<span class="pill watch">watch</span>');
+}
+function livePill(row) {
+  return row.finalized ? ''
+    : ' <span class="pill warn" title="Not yet finalized — this is the last trade so far, not the closing price. Confirms at 16:15 Sydney.">live</span>';
+}
+// Forward returns are shown MARKET-RELATIVE. Both sessions logged so far had
+// ~87% of movers close above their open, which is mostly a fact about a rising
+// market -- the raw number would mostly measure the index. Raw and index are
+// both in the tooltip so nothing is hidden.
+function relCell(row, h) {
+  const raw = row[`fwd_${h}d_pct`], mkt = row[`mkt_${h}d_pct`];
+  if (raw == null) {
+    const have = row.fwd_bars_available;
+    // Distinguish "hasn't happened yet" from "no data" -- a maturing row must
+    // never read as a flat result.
+    return have != null && have < h
+      ? `<span class="note" title="Only ${have} session(s) have elapsed since ${row.trade_date}; D+${h} does not exist yet.">·</span>`
+      : '<span class="note">—</span>';
+  }
+  const rel = mkt != null ? raw - mkt : raw;
+  const title = mkt != null
+    ? `raw ${fmt(raw)}% − ASX200 ${fmt(mkt)}% = ${fmt(rel)}%`
+    : `raw ${fmt(raw)}% (no index data)`;
+  return `<span class="${cls(rel)}" title="${title}">${fmt(rel)}</span>`;
+}
+
+function renderOutcomesHead() {
+  const cols = OUTCOMES_VIEWS[outcomesView];
+  document.getElementById('outcomes-head').innerHTML = '<tr>' + cols.map(([key, label, cl]) =>
+    `<th class="${cl} sortable${outcomesSortKey === key ? ' sorted' : ''}" onclick="sortOutcomes('${key}')">`
+    + `${label} <span class="sort-arrow">↕</span></th>`).join('') + '</tr>';
+}
+
+// The API's summary counts every row it returned. Filtering client-side and
+// leaving that summary alone would put "45 movers, 88% held above open" above
+// a table listing 3 FULL setups -- so the tiles are recomputed from exactly
+// the rows being displayed.
+function renderOutcomesSummary(rows) {
+  const key = r => _outcomeKey(r);
+  const n = rows.length;
+  const share = k => {
+    const c = rows.filter(r => key(r) === k).length;
+    return n ? `${Math.round(1000 * c / n) / 10}%` : '—';
+  };
+  const live = rows.filter(r => !r.finalized).length;
+  const settled = n - live;
+  $('#outcomes-summary').innerHTML = [
+    [live ? 'Movers (live)' : 'Mover-days',
+     live ? `${live}${settled ? ' + ' + settled + ' settled' : ''}` : n, live ? 'neu' : ''],
+    ['Held above open', share('above_open'), 'pos'],
+    ['Gapped then faded', share('above_prev_close_only'), 'neg'],
+    ['Gave it all back', share('at_or_below_prev_close'), 'neg'],
+  ].map(([k, v, cl]) => `<div class="stat"><div class="k">${k}</div><div class="v ${cl}">${v}</div></div>`).join('');
+}
+
+function renderOutcomesTable() {
+  let rows = outcomesSetup === 'all'
+    ? outcomesRows
+    : outcomesRows.filter(r => r.setup === outcomesSetup);
+  renderOutcomesSummary(rows);
+  const nAll = outcomesRows.length;
+  // The table body is capped at 60 rows; say so when the cap actually bites,
+  // or the scope line claims to be showing more than is on screen.
+  const capped = rows.length > 60 ? `, first 60 listed` : '';
+  const filt = outcomesSetup === 'all' ? '' : ` · ${rows.length} of ${nAll} (${outcomesSetup})`;
+  $('#setup-scope').textContent = (filt || (capped ? ` · ${rows.length} rows` : '')) + capped;
+  if (outcomesSortKey) {
+    const extract = OUTCOMES_EXTRACTORS[outcomesSortKey];
+    const numeric = OUTCOMES_NUMERIC.has(outcomesSortKey);
+    rows = outcomesRows.slice().sort((a, b) => {
+      let av = extract(a), bv = extract(b);
+      if (numeric) {
+        av = (av == null || Number.isNaN(av)) ? (outcomesSortAsc ? Infinity : -Infinity) : av;
+        bv = (bv == null || Number.isNaN(bv)) ? (outcomesSortAsc ? Infinity : -Infinity) : bv;
+        return outcomesSortAsc ? av - bv : bv - av;
+      }
+      av = av || ''; bv = bv || '';
+      return outcomesSortAsc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+  }
+  const cols = OUTCOMES_VIEWS[outcomesView];
+  renderOutcomesHead();
+  if (!rows.length) {
+    $('#outcomes-body').innerHTML = `<tr><td colspan="${cols.length}" class="note">Nothing logged yet.</td></tr>`;
+    return;
+  }
+  $('#outcomes-body').innerHTML = rows.slice(0, 60).map(row =>
+    '<tr>' + cols.map(([, , cl, render]) => `<td class="${cl}">${render(row)}</td>`).join('') + '</tr>'
+  ).join('');
+}
+
+// `n_announcements === null` means the row predates the announcement columns
+// and couldn't be backfilled (asxbrief keeps only a few days) -- shown as an
+// em dash, deliberately distinct from a hard 0 meaning "we looked, there was
+// no announcement". Conflating the two would make a gap with no news
+// indistinguishable from one we simply have no record for.
+function newsCell(row) {
+  const n = row.n_announcements;
+  if (n === null || n === undefined) return '<span class="note" title="No announcement record for this row">—</span>';
+  if (!n) return '<span class="note">none</span>';
+  const ps = row.has_price_sensitive ? '<span title="ASX price-sensitive flag">⚡</span>' : '';
+  const label = `${n}${ps}`;
+  const title = (row.top_headline || `${n} announcement${n > 1 ? 's' : ''}`).replace(/"/g, '&quot;');
+  return row.announcement_url
+    ? `<a href="${row.announcement_url}" target="_blank" rel="noopener" style="color:var(--accent)" title="${title}">${label}</a>`
+    : `<span title="${title}">${label}</span>`;
+}
+
+// The same number the scanner row showed on the day: the NET score for all of
+// that company's announcements for the session where asx_signals computed one
+// (marked "net"), otherwise the most material single announcement -- furthest
+// from 50, never the highest. See mover_log._annotation_values.
+function aiCell(row) {
+  const v = row.ai_score;
+  if (v === null || v === undefined) return '<span class="note">—</span>';
+  const c = v >= 60 ? 'pos' : (v <= 40 ? 'neg' : '');
+  const net = row.ai_is_net
+    ? '<small class="note" style="font-size:9px;margin-left:2px" title="Net score across all of this company\'s announcements that session">net</small>'
+    : '<small class="note" style="font-size:9px;margin-left:2px" title="No net score for that session — this is the most material single announcement (furthest from 50)">single</small>';
+  return `<span class="${c}">${v}</span>${net}`;
+}
+
+function outcomePill(row) {
+  const closeVal = row.close, openVal = row.open, prevVal = row.prev_close;
+  if (closeVal == null) return '<span class="pill watch">unresolved</span>';
+  if (closeVal > openVal) return '<span class="pill ok">held above open</span>';
+  if (closeVal > prevVal) return '<span class="pill warn">gapped, then faded</span>';
+  return '<span class="pill bad">gave it all back</span>';
+}
+
+// ---- Gap-outcomes calendar -------------------------------------------------
+// `trade_date` is logged as a UTC date, and the ASX session (10:00-16:00
+// Sydney) sits inside 00:00-06:00 UTC, so the UTC date and the Sydney session
+// date are always the same day. That lets every date here stay a plain
+// 'YYYY-MM-DD' string with no conversion -- month arithmetic uses Date.UTC so
+// the browser's own offset can never shift a cell into the wrong day.
+let calDays = {};        // 'YYYY-MM-DD' -> per-day summary from the API
+let calCursor = null;    // {y, m} of the displayed month (m is 0-based)
+let calRange = { first: null, last: null };
+let outcomesSetup = 'all';   // 'all' | 'full' | 'move+vol' | 'watch'
+let selectedDate = null; // null = rolling 30-day window
+let calInitialised = false;  // guards the open-on-today default to first load
+                             // only, so the 10-minute refresh never yanks the
+                             // view back off a day being read
+
+const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+const iso = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: SYD_TZ }); // en-CA gives YYYY-MM-DD
+const prettyDate = ymd => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return `${d} ${MONTHS[m - 1].slice(0, 3)} ${y}`;
+};
+
+async function loadCalendar() {
+  const r = await fetch('/api/scanner/outcomes/calendar');
+  if (!r.ok) return;
+  const d = await r.json();
+  calDays = {};
+  (d.days || []).forEach(x => { calDays[x.trade_date] = x; });
+  calRange = { first: d.first_date, last: d.last_date };
+
+  // On the FIRST load, open on today's session rather than the rolling
+  // window. Today is the day being watched; landing on a mixed multi-day
+  // aggregate meant the first thing on screen was never the thing wanted.
+  // Falls back to the most recent day that has data, so a weekend or a
+  // holiday shows the last real session instead of an empty table.
+  if (!calInitialised) {
+    calInitialised = true;
+    const today = sydneyToday();
+    const pick = calDays[today] ? today : calRange.last;
+    const [y, m] = (pick || today).split('-').map(Number);
+    calCursor = { y: y, m: m - 1 };
+    if (pick) { selectDay(pick); return; }      // selectDay renders + loads
+    loadOutcomes(null);
+  }
+  if (!calCursor) {
+    const [y, m] = (d.last_date || sydneyToday()).split('-').map(Number);
+    calCursor = { y: y, m: m - 1 };
+  }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const { y, m } = calCursor;
+  $('#cal-title').textContent = `${MONTHS[m]} ${y}`;
+  // Grey out navigation past the ends of what has ever been logged, so the
+  // arrows can't wander into empty months forever.
+  const firstMonth = calRange.first ? calRange.first.slice(0, 7) : null;
+  const thisMonth = `${y}-${String(m + 1).padStart(2, '0')}`;
+  $('#cal-prev').disabled = !!firstMonth && thisMonth <= firstMonth;
+  $('#cal-next').disabled = thisMonth >= sydneyToday().slice(0, 7);
+
+  const firstDow = (new Date(Date.UTC(y, m, 1)).getUTCDay() + 6) % 7;  // Mon=0
+  const nDays = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const today = sydneyToday();
+
+  let html = DOW.map(d => `<div class="cal-dow">${d}</div>`).join('');
+  for (let i = 0; i < firstDow; i++) html += '<button class="cal-day blank" disabled></button>';
+  for (let day = 1; day <= nDays; day++) {
+    const ymd = iso(y, m, day);
+    const s = calDays[ymd];
+    const isToday = ymd === today ? ' today' : '';
+    if (!s) {
+      html += `<button class="cal-day${isToday}" disabled><span class="d">${day}</span></button>`;
+      continue;
+    }
+    // Selectable on ANY logged movers, not just finalized ones -- today's
+    // session is the most useful day to look at and it never has a finalized
+    // row until 16:15. The cell shows the finalized count where there is one
+    // and the live count otherwise, so the two are never confused.
+    const n = s.n_finalized;
+    const shown = n || s.n_movers;
+    const total = n || 1;
+    const split = n
+      ? `<span class="split">
+           <i class="held" style="flex:${s.above_open / total}"></i>
+           <i class="faded" style="flex:${s.above_prev_close_only / total}"></i>
+           <i class="gave" style="flex:${s.at_or_below_prev_close / total}"></i>
+         </span>`
+      : '<span class="split"></span>';
+    const pend = s.n_pending ? `<span class="pend">${s.n_pending} pending</span>` : '';
+    const title = n
+      ? `${ymd}: ${n} finalized, ${s.held_pct}% held above open — ${s.above_open} held, ` +
+        `${s.above_prev_close_only} faded, ${s.at_or_below_prev_close} gave it back` +
+        (s.n_pending ? ` (${s.n_pending} not yet finalized)` : '')
+      : `${ymd}: ${s.n_movers} movers so far, still live — no confirmed closes until 16:15 Sydney`;
+    html += `<button class="cal-day${isToday}${ymd === selectedDate ? ' sel' : ''}${n ? '' : ' live'}"
+        data-date="${ymd}" title="${title}"${s.n_movers ? '' : ' disabled'}>
+        <span class="d">${day}</span>
+        <span class="n">${shown || '—'}${shown ? '<small>mv</small>' : ''}</span>
+        ${pend}${split}
+      </button>`;
+  }
+  $('#cal-grid').innerHTML = html;
+  $('#cal-grid').querySelectorAll('.cal-day[data-date]:not(:disabled)').forEach(b => {
+    b.onclick = () => selectDay(b.dataset.date === selectedDate ? null : b.dataset.date);
+  });
+}
+
+function selectDay(ymd) {
+  selectedDate = ymd;
+  renderCalendar();
+  loadOutcomes(ymd);
+}
+
+function shiftMonth(delta) {
+  const d = new Date(Date.UTC(calCursor.y, calCursor.m + delta, 1));
+  calCursor = { y: d.getUTCFullYear(), m: d.getUTCMonth() };
+  renderCalendar();
+}
+
+async function loadOutcomes(onDate) {
+  // Provisional rows only ever for a single named day. The rolling 30-day
+  // statistic stays finalized-only so a half-finished session cannot skew it.
+  const q = onDate ? `date=${encodeURIComponent(onDate)}&provisional=true` : 'days=30';
+  const r = await fetch('/api/scanner/outcomes?' + q);
+  if (!r.ok) return;
+  const d = await r.json();
+  // Summary tiles are rendered by renderOutcomesTable, from the filtered rows.
+  $('#cal-scope').textContent = onDate
+    ? `Showing ${prettyDate(onDate)} only.`
+    : 'Showing the rolling last 30 days.';
+  $('#cal-reset').style.display = onDate ? '' : 'none';
+  const pending = d.pending_finalize_today || 0;
+  $('#outcomes-note').textContent = onDate
+    ? (d.n_provisional
+        ? `${prettyDate(onDate)}: ${d.n_provisional} of these are still LIVE — the close column is `
+          + `the last trade so far, not a confirmed close, so every outcome below is provisional `
+          + `until the 16:15 Sydney finalize.`
+        : (d.n_finalized ? `${d.n_finalized} finalized movers on ${prettyDate(onDate)}.`
+                         : `Nothing logged on ${prettyDate(onDate)}.`))
+    : (pending
+        ? `${pending} of today's movers are still mid-session (last traded, not yet a confirmed close) — finalizes at 16:15 Sydney.`
+        : (d.n_finalized ? `Over the last ${d.days} days.` : 'No finalized mover-days yet — check back after the next market close.'));
+  outcomesRows = d.rows || [];
+  renderOutcomesTable();
+}
+
+$('#refresh').onclick = () => loadScan(true);
+$('#dlg-cancel').onclick = () => $('#trade-dialog').close();
+$('#dlg-ok').onclick = async () => {
+  const ticker = ($('#dlg-ticker').value || '').trim().toUpperCase();
+  if (!ticker) { alert('Ticker is required'); return; }
+  const conviction = $('#dlg-conv').value ? parseInt($('#dlg-conv').value, 10) : null;
+  const aiScore = $('#dlg-ai').value ? parseInt($('#dlg-ai').value, 10) : null;
+  const body = {
+    ticker: ticker,
+    entry_price: parseFloat($('#dlg-price').value),
+    dollars: parseFloat($('#dlg-dollars').value),
+    stop_pct: parseFloat($('#dlg-stop').value),
+    hold_days: parseInt($('#dlg-hold').value, 10),
+    note: $('#dlg-note').value || null,
+    setup: Object.assign({}, currentSetup || {}, {
+      source: $('#dlg-source').value,
+      ai_score_at_entry: aiScore,
+      conviction: conviction,
+    }),
+  };
+  const r = await fetch('/api/scanner/trades', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!r.ok) { alert('Could not open: ' + (await r.text())); return; }
+  $('#trade-dialog').close();
+  // The trades list lives on the watchlist page now, so there is nothing here
+  // to refresh -- say where it went rather than appearing to do nothing.
+  const note = $('#meta');
+  const prev = note.innerHTML;
+  note.innerHTML = `Paper trade opened for <strong>${ticker}</strong> — `
+    + `<a href="/watchlist" style="color:var(--accent)">see it on the watchlist</a>.`;
+  setTimeout(() => { note.innerHTML = prev; }, 8000);
+};
+
+fetch('/api/auth/status').then(r => r.json()).then(a => {
+  if (a && a.authenticated) ['analysis', 'reports', 'sync', 'logout'].forEach(k => {
+    const el = document.getElementById(k + '-nav-link'); if (el) el.style.display = '';
+  });
+}).catch(() => {});
+
+async function loadEod() {
+  $('#eod-body').innerHTML = '<tr><td colspan="6" class="note">Scanning…</td></tr>';
+  // store=false: looking at the page must not write into the forward record.
+  // Only the 15:45 timer stores, so the live track record stays one row per
+  // session rather than one per time anybody opened the page.
+  const r = await fetch('/api/eod/scan?store=false');
+  if (!r.ok) { $('#eod-body').innerHTML = '<tr><td colspan="6" class="note">Scan failed.</td></tr>'; return; }
+  const d = await r.json();
+  $('#eod-meta').innerHTML = `${d.n_candidates} above ${d.threshold}x · ${d.n_with_data} of `
+    + `${d.n_universe} with data · ${d.sydney_time} Sydney`
+    + (d.window_complete
+        ? ' · <span class="pill ok">full window</span>'
+        : ' · <span class="pill warn" title="Before 15:00 the ratio is computed on fewer hours than the strategy was measured on. Directionally useful, but a different statistic.">preview — window not complete</span>');
+  const rows = d.candidates || [];
+  if (!rows.length) { $('#eod-body').innerHTML = '<tr><td colspan="6" class="note">Nothing above the threshold.</td></tr>'; return; }
+  $('#eod-body').innerHTML = rows.map(c => `<tr>
+    <td><strong>${c.ticker}</strong></td>
+    <td class="hl">${c.company || '—'}</td>
+    <td class="num"><strong>${fmt(c.vol_ratio, 1)}x</strong></td>
+    <td class="num">${fmt(c.price, 3)}</td>
+    <td class="num ${cls(c.move_pct)}">${c.move_pct != null ? fmt(c.move_pct) : '—'}</td>
+    <td class="actions"><button class="btn2 ghost" data-eodwatch="${c.ticker}">+ Watch</button></td>
+  </tr>`).join('');
+  document.querySelectorAll('[data-eodwatch]').forEach(b => b.onclick = () => {
+    const row = rows.find(x => x.ticker === b.dataset.eodwatch) || {};
+    addToWatchlist(b, { ticker: b.dataset.eodwatch, company: row.company || null,
+                        source: 'eod-volume', ai_score: null });
+  });
+}
+$('#eod-refresh').onclick = loadEod;
+
+document.querySelectorAll('.seg2[data-setup]').forEach(b => b.onclick = () => {
+  outcomesSetup = b.dataset.setup;
+  document.querySelectorAll('.seg2[data-setup]').forEach(x => x.classList.toggle('on', x === b));
+  renderOutcomesTable();
+});
+
+document.querySelectorAll('.seg[data-view]').forEach(b => b.onclick = () => {
+  outcomesView = b.dataset.view;
+  document.querySelectorAll('.seg[data-view]').forEach(x => x.classList.toggle('on', x === b));
+  // A sort key from the other view has no column here; drop back to the
+  // API's natural order rather than silently sorting by something invisible.
+  if (!OUTCOMES_VIEWS[outcomesView].some(([k]) => k === outcomesSortKey)) outcomesSortKey = null;
+  $('#view-note').textContent = outcomesView === 'forward'
+    ? 'Returns from the mover day’s close, minus the ASX 200 over the same window. “·” = that horizon has not elapsed yet.'
+    : '';
+  renderOutcomesTable();
+});
+
+$('#cal-prev').onclick = () => shiftMonth(-1);
+$('#cal-next').onclick = () => shiftMonth(1);
+$('#cal-reset').onclick = () => selectDay(null);
+
+loadScan(false);
+// loadCalendar picks the initial day (today) and loads it; calling
+// loadOutcomes here too would fetch the rolling window and immediately
+// discard it.
+loadCalendar();
+// 10 minutes, matching the server cache TTL and asx-scanner-refresh.timer's
+// cadence (see the skill doc) -- the background timer keeps the cache warm
+// regardless of whether this page is open, so polling faster than the TTL
+// would just re-fetch the same cached response for no benefit.
+setInterval(() => loadScan(false), 600000);
+// Keep the day selection across the auto-refresh -- a background reload that
+// silently snapped the table back to the 30-day window would be worse than
+// not refreshing at all while a past day is being read.
+setInterval(() => { loadCalendar(); loadOutcomes(selectedDate); }, 600000);
+</script>
+</body>
+</html>

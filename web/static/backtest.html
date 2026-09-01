@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backtest — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --naive:    #6e7681;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .section-note { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  section { margin-bottom: 32px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }
+
+  .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .field label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 5px; }
+  .field input, .field select {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 10px; font-size: 13px;
+  }
+  .field input[type=text] { text-transform: uppercase; }
+  #params-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 14px; }
+
+  .btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 8px 16px; font-size: 13px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { opacity: 0.85; color: #fff; }
+
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.event { background: rgba(56,139,253,0.15); color: var(--accent); }
+
+  .banner { border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .banner.warn { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); color: var(--hold); }
+  .banner.fail { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: var(--sell); }
+  .banner.pass { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: var(--buy); }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat-tile { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .stat-tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .stat-tile .value { font-size: 17px; font-weight: 700; }
+  .pos { color: var(--buy); } .neg { color: var(--sell); } .neu { color: var(--muted); }
+
+  .chart-wrap { position: relative; }
+  svg.chart { width: 100%; height: auto; overflow: visible; }
+  .chart-gridline { stroke: var(--border); stroke-width: 1; }
+  .chart-axis-label { fill: var(--muted); font-size: 10px; }
+  .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .chart-line.naive { stroke: var(--naive); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.7; }
+  .chart-line.buyhold { stroke: var(--hold); stroke-width: 1.5; opacity: 0.8; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 8px; flex-wrap: wrap; }
+  .legend .swatch { display: inline-block; width: 12px; height: 2px; margin-right: 5px; vertical-align: middle; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .table-scroll { overflow-x: auto; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+  .msg { font-size: 12px; margin-top: 8px; }
+  .msg.err { color: var(--sell); }
+  #results { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance">Performance</a>
+    <a href="/asx">ASX</a>
+    <a href="/research">Patterns</a>
+    <a href="/swing">Swing</a>
+    <a href="/backtest" class="active">Backtest</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/watchlist">Watchlist</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="page">
+  <h1>Backtest</h1>
+  <p class="subtitle">Pick a ticker, pick a strategy, see results — with the statistical honesty layer always shown, not just the number that looks good. One ticker over a few years is usually 20-40 trades; an equity curve from 25 trades looks exactly as convincing as one from 2,500.</p>
+
+  <section>
+    <h2>Configuration</h2>
+    <div class="card">
+      <div class="config-grid">
+        <div class="field" id="ticker-field">
+          <label>Ticker</label>
+          <input id="ticker-input" type="text" placeholder="e.g. CBA" maxlength="10">
+        </div>
+        <div class="field" id="market-field">
+          <label>Market</label>
+          <select id="market-select">
+            <option value="AU">AU (.AX)</option>
+            <option value="US">US</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Strategy</label>
+          <select id="strategy-select"></select>
+        </div>
+        <div class="field" id="period-field">
+          <label>Period</label>
+          <select id="period-select">
+            <option value="2y">2 years</option>
+            <option value="5y">5 years</option>
+            <option value="10y" selected>10 years</option>
+            <option value="max">Max available</option>
+          </select>
+        </div>
+      </div>
+      <div id="params-grid"></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn primary" id="run-btn" onclick="runBacktest()">Run</button>
+        <span id="event-driven-badge" style="display:none" class="badge event">Event-driven (AU only)</span>
+        <span class="msg" id="run-msg"></span>
+      </div>
+    </div>
+  </section>
+
+  <div id="results">
+    <section id="banners-section"></section>
+
+    <section>
+      <h2>Trade Count &amp; Statistics</h2>
+      <div class="card">
+        <div class="stat-grid" id="stat-grid"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Equity Curve</h2>
+      <p class="section-note">Realistic fill (solid) vs naive touch-fill (dashed) vs buy-and-hold (overlay) — the gap between realistic and naive measures how much apparent edge is simulation artefact.</p>
+      <div class="card">
+        <div class="chart-wrap">
+          <svg class="chart" id="equity-svg" viewBox="0 0 900 320"></svg>
+        </div>
+        <div class="legend">
+          <span><span class="swatch" style="background:var(--accent)"></span>Realistic</span>
+          <span><span class="swatch" style="background:var(--naive)"></span>Naive touch-fill</span>
+          <span><span class="swatch" style="background:var(--hold)"></span>Buy &amp; hold</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sub-Periods</h2>
+      <p class="section-note">Reported separately, not blended into one recency-weighted number — consistency across periods is the finding; a single average is not.</p>
+      <div class="card table-scroll">
+        <table id="subperiod-table">
+          <thead><tr><th>Period</th><th>Trades</th><th>Win Rate</th><th>Avg Return</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Trade List</h2>
+      <div class="card table-scroll">
+        <table id="trades-table">
+          <thead><tr><th>Signal</th><th>Entry</th><th>Filled</th><th>Exit</th><th>Exit Price</th><th>Reason</th><th>Return</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="trades-empty" style="display:none">No trades.</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+  function fmtPct(v) { return v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(2) + '%'; }
+  function pnlClass(v) { return v == null ? 'neu' : v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu'; }
+
+  let strategies = {};
+
+  async function loadStrategies() {
+    const res = await fetch('/api/backtest/strategies');
+    const data = await res.json();
+    const select = document.getElementById('strategy-select');
+    select.innerHTML = data.strategies.map(s => `<option value="${s.key}">${escapeHtml(s.name)}</option>`).join('');
+    for (const s of data.strategies) strategies[s.key] = s;
+    onStrategyChange();
+  }
+
+  function onStrategyChange() {
+    const key = document.getElementById('strategy-select').value;
+    const s = strategies[key];
+    if (!s) return;
+    document.getElementById('event-driven-badge').style.display = s.event_driven ? '' : 'none';
+
+    const isRangeModel = key === 'range_model';
+    document.getElementById('ticker-field').style.display = isRangeModel ? 'none' : '';
+    document.getElementById('market-field').style.display = isRangeModel ? 'none' : '';
+    document.getElementById('period-field').style.display = isRangeModel ? 'none' : '';
+
+    const grid = document.getElementById('params-grid');
+    grid.innerHTML = Object.entries(s.default_params).map(([k, v]) => `
+      <div class="field">
+        <label>${escapeHtml(k)}</label>
+        <input data-param="${escapeHtml(k)}" type="text" value="${escapeHtml(Array.isArray(v) ? v.join(',') : v)}">
+      </div>
+    `).join('');
+  }
+
+  function collectParams() {
+    const key = document.getElementById('strategy-select').value;
+    const defaults = strategies[key].default_params;
+    const params = {};
+    document.querySelectorAll('#params-grid input').forEach(input => {
+      const k = input.dataset.param;
+      const defaultVal = defaults[k];
+      let v = input.value;
+      if (Array.isArray(defaultVal)) v = v.split(',').map(s => s.trim());
+      else if (typeof defaultVal === 'number') v = parseFloat(v);
+      params[k] = v;
+    });
+    return params;
+  }
+
+  async function runBacktest() {
+    const btn = document.getElementById('run-btn');
+    const msg = document.getElementById('run-msg');
+    const key = document.getElementById('strategy-select').value;
+    const body = {
+      strategy: key,
+      market: document.getElementById('market-select').value,
+      period: document.getElementById('period-select').value,
+      params: collectParams(),
+    };
+    if (key !== 'range_model') {
+      const ticker = document.getElementById('ticker-input').value.trim().toUpperCase();
+      if (!ticker) { msg.textContent = 'Enter a ticker'; msg.className = 'msg err'; return; }
+      body.ticker = ticker;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Running…';
+    msg.textContent = '';
+    try {
+      const res = await fetch('/api/backtest/run', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'failed');
+      renderResults(data);
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = 'msg err';
+      document.getElementById('results').style.display = 'none';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Run';
+    }
+  }
+
+  function renderResults(data) {
+    document.getElementById('results').style.display = '';
+
+    // Banners
+    const banners = [];
+    if (data.insufficient_sample) {
+      banners.push(`<div class="banner warn">⚠ ${escapeHtml(data.insufficient_sample_note || 'Insufficient sample')}</div>`);
+    }
+    if (data.gate_detail) {
+      const passed = data.passes_both_gates;
+      banners.push(`<div class="banner ${passed ? 'pass' : 'fail'}">
+        ${passed ? '✓ Beats both gates' : '✗ Fails the gate(s)'} —
+        randomised-entry null: ${data.gate_detail.beats_randomised_entry_null ? 'beat' : 'not beaten'},
+        buy-and-hold: ${data.gate_detail.beats_buy_and_hold ? 'beat' : 'not beaten'}
+      </div>`);
+    }
+    document.getElementById('banners-section').innerHTML = banners.join('');
+
+    // Stat tiles
+    const perm = data.randomised_entry_test || {};
+    const ci = data.confidence_interval || {};
+    const tiles = [
+      ['Trades', data.n_trades],
+      ['Win Rate', data.win_rate_pct != null ? data.win_rate_pct.toFixed(1) + '%' : '—'],
+      ['Avg Return', data.realistic ? fmtPct(data.realistic.avg_return_pct) : '—', pnlClass(data.realistic?.avg_return_pct)],
+      ['95% CI', ci.ci_low_pct != null ? `${ci.ci_low_pct.toFixed(2)}% / ${ci.ci_high_pct.toFixed(2)}%` : '—'],
+      ['Max Drawdown', data.max_drawdown?.max_drawdown_pct != null ? data.max_drawdown.max_drawdown_pct.toFixed(2) + '%' : '—', 'neg'],
+      ['Buy &amp; Hold', fmtPct(data.buy_and_hold_return_pct), pnlClass(data.buy_and_hold_return_pct)],
+      ['Time in Market', data.time_in_market_pct != null ? data.time_in_market_pct.toFixed(1) + '%' : '—'],
+      ['Randomised-Entry %ile', perm.actual_percentile_in_null != null ? perm.actual_percentile_in_null.toFixed(1) : '—'],
+    ];
+    document.getElementById('stat-grid').innerHTML = tiles.map(([label, value, cls]) => `
+      <div class="stat-tile">
+        <div class="label">${label}</div>
+        <div class="value ${cls || ''}">${value}</div>
+      </div>
+    `).join('');
+
+    renderEquityCurve(data.equity_curve_realistic || [], data.equity_curve_naive || [], data.buy_hold_curve || []);
+
+    // Sub-periods
+    const subBody = document.querySelector('#subperiod-table tbody');
+    const sp = data.sub_periods || {};
+    subBody.innerHTML = Object.entries(sp).map(([label, s]) => `
+      <tr>
+        <td>${escapeHtml(label)}</td>
+        <td>${s.n_trades}</td>
+        <td>${s.win_rate_pct != null ? s.win_rate_pct + '%' : '—'}</td>
+        <td class="${pnlClass(s.avg_return_pct)}">${fmtPct(s.avg_return_pct)}</td>
+      </tr>
+    `).join('');
+
+    // Trade list
+    const trades = data.trade_list || [];
+    const tradesBody = document.querySelector('#trades-table tbody');
+    tradesBody.innerHTML = trades.map(t => `
+      <tr>
+        <td>${escapeHtml(t.signal_date)}</td>
+        <td>${t.entry.toFixed(3)}</td>
+        <td>${escapeHtml(t.entry_fill_date || '—')}</td>
+        <td>${escapeHtml(t.exit_date || '—')}</td>
+        <td>${t.exit_price != null ? t.exit_price.toFixed(3) : '—'}</td>
+        <td>${escapeHtml(t.exit_reason || '—')}</td>
+        <td class="${pnlClass(t.gross_return_pct)}">${fmtPct(t.gross_return_pct)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('trades-empty').style.display = trades.length ? 'none' : '';
+    document.getElementById('trades-table').style.display = trades.length ? '' : 'none';
+  }
+
+  function renderEquityCurve(realistic, naive, buyHold) {
+    const svg = document.getElementById('equity-svg');
+    const allPoints = [...realistic, ...naive, ...buyHold];
+    if (!allPoints.length) {
+      svg.innerHTML = '<text class="chart-axis-label" x="450" y="160" text-anchor="middle">No data</text>';
+      return;
+    }
+    const W = 900, H = 320;
+    const M = { top: 16, right: 20, bottom: 28, left: 50 };
+    const plotW = W - M.left - M.right, plotH = H - M.top - M.bottom;
+
+    const allDates = [...new Set(allPoints.map(p => p.date))].sort();
+    const dateIdx = Object.fromEntries(allDates.map((d, i) => [d, i]));
+    const values = allPoints.map(p => p.equity);
+    const yMin = Math.min(...values), yMax = Math.max(...values);
+    const pad = (yMax - yMin) * 0.1 || 5;
+    const yDomain = [yMin - pad, yMax + pad];
+
+    const xScale = d => M.left + (dateIdx[d] / Math.max(1, allDates.length - 1)) * plotW;
+    const yScale = v => M.top + plotH - (v - yDomain[0]) / (yDomain[1] - yDomain[0]) * plotH;
+
+    let parts = [];
+    for (const t of [yDomain[0], (yDomain[0] + yDomain[1]) / 2, yDomain[1]]) {
+      const y = yScale(t);
+      parts.push(`<line class="chart-gridline" x1="${M.left}" y1="${y}" x2="${W - M.right}" y2="${y}"></line>`);
+      parts.push(`<text class="chart-axis-label" x="${M.left - 8}" y="${y + 3}" text-anchor="end">${t.toFixed(0)}</text>`);
+    }
+    if (allDates.length) {
+      parts.push(`<text class="chart-axis-label" x="${M.left}" y="${H - M.bottom + 18}">${allDates[0]}</text>`);
+      parts.push(`<text class="chart-axis-label" x="${W - M.right}" y="${H - M.bottom + 18}" text-anchor="end">${allDates[allDates.length - 1]}</text>`);
+    }
+
+    const pathFor = pts => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${xScale(p.date).toFixed(1)},${yScale(p.equity).toFixed(1)}`).join(' ');
+    if (buyHold.length) parts.push(`<path class="chart-line buyhold" d="${pathFor(buyHold)}"></path>`);
+    if (naive.length) parts.push(`<path class="chart-line naive" d="${pathFor(naive)}"></path>`);
+    if (realistic.length) parts.push(`<path class="chart-line" d="${pathFor(realistic)}"></path>`);
+
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = parts.join('');
+  }
+
+  document.getElementById('strategy-select').addEventListener('change', onStrategyChange);
+
+  fetch('/api/auth/status').then(r => r.json()).then(d => {
+    if (d.authenticated) {
+      document.getElementById('analysis-nav-link').style.display = '';
+      document.getElementById('reports-nav-link').style.display = '';
+      document.getElementById('sync-nav-link').style.display = '';
+      document.getElementById('logout-nav-link').style.display = '';
+    }
+  }).catch(() => {});
+
+  loadStrategies();
+</script>
+</body>
+</html>

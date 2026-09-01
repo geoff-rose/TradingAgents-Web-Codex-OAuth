@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASX Dashboard — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --keyword:  #a78bfa;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+  section { margin-bottom: 32px; }
+
+  /* ── Market snapshot tiles ── */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .tile .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .tile .value { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .tile .change { font-size: 12px; font-weight: 600; }
+  .pos { color: var(--buy); }
+  /* Sector board reuses .tile so it reads as one continuous board with the
+     Markets panel above rather than a second, differently-shaped widget. */
+  .tile.market-row { border-color: var(--muted); }
+  .tile .sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  td.sector { color: var(--text); font-size: 12px; white-space: nowrap; }
+  .sector-weak { color: var(--muted); opacity: .65; }
+  .neg { color: var(--sell); }
+  .neu { color: var(--muted); }
+
+  /* ── Yield chart ── */
+  .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; position: relative; }
+  .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart-axis-label { fill: var(--muted); font-size: 11px; }
+  .chart-gridline { stroke: var(--border); stroke-width: 1; }
+  .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .chart-line.compare { stroke: var(--muted); stroke-dasharray: 5 4; stroke-width: 1.5; }
+  .chart-dot { fill: var(--accent); }
+  .chart-dot.compare { fill: var(--muted); }
+  .chart-stem { stroke: var(--border); stroke-width: 1; }
+  .chart-legend { display: flex; gap: 16px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
+  .chart-legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  .chart-legend .swatch { width: 16px; height: 0; display: inline-block; border-top: 2px solid var(--accent); }
+  .chart-legend .swatch.compare { border-top-style: dashed; border-top-color: var(--muted); }
+  .chart-tooltip {
+    position: absolute; pointer-events: none; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; color: var(--text); white-space: nowrap;
+    transform: translate(-50%, -100%); margin-top: -10px; display: none; z-index: 10;
+  }
+  .period-toggle { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+
+  /* ── Feed ── */
+  .filters { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .filters button {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  .filters button.active { color: var(--text); border-color: var(--accent); }
+  .feed-search { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+  .feed-search input {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px; width: 190px;
+    text-transform: uppercase;
+  }
+  .feed-search input::placeholder { text-transform: none; color: var(--muted); }
+  .feed-search input:focus { outline: none; border-color: var(--accent); }
+  .feed-search button {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 17px; line-height: 1; padding: 0 4px;
+  }
+  .searching { color: var(--accent); }
+  .universe-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .universe-toggle input { accent-color: var(--accent); cursor: pointer; }
+  .count { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: var(--surface); color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text); }
+  th .sort-arrow { opacity: 0.4; font-size: 10px; }
+  th.sorted .sort-arrow { opacity: 1; }
+  td { padding: 7px 12px; border-bottom: 1px solid var(--border); }
+  td.headline { white-space: normal; max-width: 520px; }
+  td.company { max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  td.time { white-space: nowrap; color: var(--muted); }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .badge.halt { background: rgba(239,68,68,0.15); color: var(--sell); }
+  .badge.ps   { background: rgba(245,158,11,0.15); color: var(--hold); }
+  .badge.keyword { background: rgba(167,139,250,0.15); color: var(--keyword); }
+  .badge.signal-buy  { background: rgba(34,197,94,0.15);  color: var(--buy); }
+  .badge.signal-sell { background: rgba(239,68,68,0.15);  color: var(--sell); }
+  .badge.signal-hold { background: rgba(245,158,11,0.15); color: var(--hold); }
+  .pdf-link { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .pdf-link:hover { text-decoration: underline; }
+  .loading, .empty { text-align: center; color: var(--muted); padding: 40px; }
+  .error { color: var(--sell); padding: 16px; }
+
+  .collector-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .dot.ok { background: var(--buy); }
+  .dot.bad { background: var(--sell); }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance">Performance</a>
+    <a href="/asx" class="active">ASX</a>
+    <a href="/research">Patterns</a>
+    <a href="/swing">Swing</a>
+    <a href="/backtest">Backtest</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/watchlist">Watchlist</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <span class="collector-status" id="collector-status"><span class="dot" id="collector-dot"></span><span id="collector-text">checking collector…</span></span>
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="page">
+  <h1>ASX Dashboard</h1>
+  <p class="subtitle">Market snapshot, sector performance, the US Treasury yield curve, and the live ASX announcement stream.</p>
+
+  <section>
+    <h2>Markets</h2>
+    <div class="tiles" id="tiles">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Sectors <span id="sector-asof" class="muted" style="font-size:13px;font-weight:400"></span></h2>
+    <div class="tiles" id="sectors">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>U.S. Treasury Yield Curve</h2>
+    <div class="period-toggle">
+      <label class="universe-toggle" id="curve-compare-label">
+        <input type="checkbox" id="curve-compare-toggle" checked onchange="loadYieldCurve()">
+        <span>Compare to 1 year ago</span>
+      </label>
+      <span class="count" id="curve-asof"></span>
+    </div>
+    <div class="chart-legend" id="curve-legend" style="display:none">
+      <span class="key"><span class="swatch now"></span>Now</span>
+      <span class="key"><span class="swatch compare"></span>1 year ago</span>
+    </div>
+    <div class="chart-wrap">
+      <svg id="yield-svg" viewBox="0 0 900 320" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="chart-tooltip" id="yield-tooltip"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>ASX Announcement Stream</h2>
+    <div class="filters">
+      <button class="active" data-kind="all" onclick="setFeedKind('all')">All</button>
+      <button data-kind="halts" onclick="setFeedKind('halts')">Halts</button>
+      <button data-kind="sensitive" onclick="setFeedKind('sensitive')">Price Sensitive</button>
+      <button data-kind="keywords" onclick="setFeedKind('keywords')" title="Announcements whose PDF mentions a watched keyword (e.g. State Street)">🔍 Keyword Watch</button>
+      <span class="feed-search">
+        <input id="feed-search" type="search" placeholder="Find a ticker (e.g. MVF)…"
+               maxlength="8" autocomplete="off" spellcheck="false">
+        <button id="feed-search-clear" title="Clear search" hidden>&times;</button>
+      </span>
+      <label class="universe-toggle" id="universe-toggle-label">
+        <input type="checkbox" id="universe-toggle" checked onchange="loadFeed()">
+        <span id="universe-toggle-text">Top 500 by market cap only</span>
+      </label>
+      <label class="universe-toggle" title="One row and one net score per company per session. A company usually splits a single event across several documents, so per-announcement scores double-count it.">
+        <input type="checkbox" id="group-toggle" checked onchange="loadFeed()">
+        <span>Group by company</span>
+      </label>
+      <label class="universe-toggle" title="Only the current ASX session, measured in Sydney time — so a 7:30am pre-open announcement counts as today even though it is still yesterday in UTC. Unticked, the feed falls back to the newest few hundred announcements, which spans several days.">
+        <input type="checkbox" id="today-toggle" checked onchange="loadFeed()">
+        <span>Today only</span>
+      </label>
+      <button id="classify-btn" onclick="classifyNow()" title="AI Buy/Sell/Hold + score for price-sensitive and halt announcements not yet classified">⚡ Classify now</button>
+      <span class="count" id="feed-count"></span>
+      <span class="count" id="llm-usage" title="Actual provider calls made, counted at the call itself — not inferred from cached rows, which undercount because they are upserts."></span>
+    </div>
+    <div id="feed-loading" class="loading">Loading…</div>
+    <div id="feed-error" class="error" style="display:none"></div>
+    <div class="table-wrap" id="feed-table-wrap" style="display:none">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable" onclick="sortBy('time')">Time <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortBy('ticker')">Ticker <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortBy('company')">Company <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortBy('sector')">Sector <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortBy('rank')">Rank <span class="sort-arrow">↕</span></th>
+            <th>Flag</th>
+            <th class="sortable" onclick="sortBy('signal')">Signal <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortBy('score')">Score <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortBy('headline')">Headline <span class="sort-arrow">↕</span></th>
+            <th></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="feed-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+  const TZ = 'Australia/Adelaide';
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString('en-AU', {
+        timeZone: TZ, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+      });
+    } catch (e) { return iso; }
+  }
+
+  // ── Market snapshot ─────────────────────────────────────────────────────
+  async function loadSnapshot() {
+    try {
+      const res = await fetch('/api/markets/snapshot');
+      const data = await res.json();
+      const wrap = document.getElementById('tiles');
+      wrap.innerHTML = data.items.map(item => {
+        if (item.last == null) {
+          return `<div class="tile"><div class="label">${item.label}</div><div class="value neu">—</div></div>`;
+        }
+        if (item.is_point_diff) {
+          const cls = item.last > 0 ? 'pos' : item.last < 0 ? 'neg' : 'neu';
+          const sign = item.last > 0 ? '+' : '';
+          return `<div class="tile">
+            <div class="label">${item.label}</div>
+            <div class="value ${cls}">${sign}${item.last.toFixed(0)} pts</div>
+          </div>`;
+        }
+        const decimals = Math.abs(item.last) < 20 ? 3 : 2;
+        const cls = item.change_pct > 0 ? 'pos' : item.change_pct < 0 ? 'neg' : 'neu';
+        const sign = item.change_pct > 0 ? '+' : '';
+        const unit = item.symbol === '^TNX' ? '%' : '';
+        const value = item.last.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        return `<div class="tile">
+          <div class="label">${item.label}</div>
+          <div class="value">${value}${unit}</div>
+          <div class="change ${cls}">${sign}${item.change_pct.toFixed(2)}%</div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('tiles').innerHTML = `<div class="error">Failed to load market snapshot: ${e.message}</div>`;
+    }
+  }
+
+  // ── Sector board ────────────────────────────────────────────────────────
+  function pct(v, digits = 2) {
+    if (v == null) return '—';
+    return `${v > 0 ? '+' : ''}${v.toFixed(digits)}%`;
+  }
+  function cls(v) { return v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu'; }
+
+  function sectorTile(s, isMarket) {
+    const d = s.day_pct;
+    const c = cls(d);
+    const sub = [s.week_pct, s.month_pct].every(v => v == null) ? '' :
+      `<div class="sub">wk ${pct(s.week_pct, 1)} · mo ${pct(s.month_pct, 1)}</div>`;
+    return `<div class="tile${isMarket ? ' market-row' : ''}">
+      <div class="label">${s.label}</div>
+      <div class="value ${c}">${pct(d)}</div>
+      ${sub}
+    </div>`;
+  }
+
+  async function loadSectors() {
+    const wrap = document.getElementById('sectors');
+    try {
+      const res = await fetch('/api/markets/sectors');
+      const data = await res.json();
+      const rows = data.sectors || [];
+      if (!rows.length) { wrap.innerHTML = '<div class="loading">No sector data</div>'; return; }
+      document.getElementById('sector-asof').textContent =
+        data.as_of ? `— ${data.as_of}` : '';
+      wrap.innerHTML = sectorTile(data.market, true)
+        + rows.map(s => sectorTile(s, false)).join('');
+    } catch (e) {
+      wrap.innerHTML = `<div class="error">Failed to load sectors: ${e.message}</div>`;
+    }
+  }
+
+  // ── Yield curve ─────────────────────────────────────────────────────────
+  function niceTicks(min, max, count) {
+    const range = max - min || 1;
+    const rawStep = range / count;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+    const ticks = [];
+    for (let t = Math.ceil(min / step) * step; t <= max; t += step) {
+      ticks.push(Math.round(t * 100) / 100);
+    }
+    return ticks;
+  }
+
+  async function loadYieldCurve() {
+    const svg = document.getElementById('yield-svg');
+    const tooltip = document.getElementById('yield-tooltip');
+    const showCompare = document.getElementById('curve-compare-toggle').checked;
+    try {
+      const res = await fetch('/api/markets/yield-curve');
+      const data = await res.json();
+      const points = data.points || [];
+      document.getElementById('curve-asof').textContent = data.as_of ? `as of ${data.as_of}` : '';
+      if (!points.length) {
+        svg.innerHTML = '<text class="chart-axis-label" x="450" y="160" text-anchor="middle">No data</text>';
+        return;
+      }
+
+      const W = 900, H = 320;
+      const M = { top: 16, right: 20, bottom: 32, left: 46 };
+      const plotW = W - M.left - M.right;
+      const plotH = H - M.top - M.bottom;
+
+      const allYields = points.flatMap(p => [p.current, showCompare ? p.year_ago : null]).filter(v => v != null);
+      const yMin = Math.min(...allYields), yMax = Math.max(...allYields);
+      const pad = (yMax - yMin) * 0.12 || 0.25;
+      const yDomain = [Math.max(0, yMin - pad), yMax + pad];
+
+      const maxMonths = points[points.length - 1].months;
+      const xScale = m => M.left + (m / maxMonths) * plotW;
+      const yScale = v => M.top + plotH - (v - yDomain[0]) / (yDomain[1] - yDomain[0]) * plotH;
+
+      let parts = [];
+      const yTicks = niceTicks(yDomain[0], yDomain[1], 6);
+      for (const t of yTicks) {
+        const y = yScale(t);
+        parts.push(`<line class="chart-gridline" x1="${M.left}" y1="${y}" x2="${W - M.right}" y2="${y}"></line>`);
+        parts.push(`<text class="chart-axis-label" x="${M.left - 8}" y="${y + 3}" text-anchor="end">${t.toFixed(2)}%</text>`);
+      }
+
+      for (const p of points) {
+        const x = xScale(p.months);
+        parts.push(`<line class="chart-stem" x1="${x}" y1="${yScale(p.current)}" x2="${x}" y2="${M.top + plotH}"></line>`);
+        parts.push(`<text class="chart-axis-label" x="${x}" y="${H - M.bottom + 18}" text-anchor="middle">${p.maturity}</text>`);
+      }
+
+      if (showCompare) {
+        const comparePts = points.filter(p => p.year_ago != null);
+        const comparePath = comparePts.map((p, i) => `${i === 0 ? 'M' : 'L'}${xScale(p.months).toFixed(1)},${yScale(p.year_ago).toFixed(1)}`).join(' ');
+        parts.push(`<path class="chart-line compare" d="${comparePath}"></path>`);
+        comparePts.forEach(p => {
+          parts.push(`<circle class="chart-dot compare" cx="${xScale(p.months).toFixed(1)}" cy="${yScale(p.year_ago).toFixed(1)}" r="4"></circle>`);
+        });
+      }
+
+      const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xScale(p.months).toFixed(1)},${yScale(p.current).toFixed(1)}`).join(' ');
+      parts.push(`<path class="chart-line" d="${path}"></path>`);
+      points.forEach((p, i) => {
+        parts.push(`<circle class="chart-dot" data-i="${i}" cx="${xScale(p.months).toFixed(1)}" cy="${yScale(p.current).toFixed(1)}" r="9" fill-opacity="0" stroke="none"></circle>`);
+        parts.push(`<circle class="chart-dot" cx="${xScale(p.months).toFixed(1)}" cy="${yScale(p.current).toFixed(1)}" r="4"></circle>`);
+      });
+
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      svg.innerHTML = parts.join('');
+      document.getElementById('curve-legend').style.display = showCompare ? 'flex' : 'none';
+
+      svg.querySelectorAll('circle[data-i]').forEach(dot => {
+        const p = points[+dot.dataset.i];
+        dot.style.pointerEvents = 'all';
+        dot.style.cursor = 'crosshair';
+        dot.addEventListener('mouseenter', (e) => {
+          const compareLine = (showCompare && p.year_ago != null)
+            ? `<br><span style="color:var(--muted)">1y ago: ${p.year_ago.toFixed(2)}%</span>` : '';
+          tooltip.innerHTML = `<strong>${p.maturity}</strong> — ${p.current.toFixed(2)}%${compareLine}`;
+          tooltip.style.display = 'block';
+          positionTooltip(e);
+        });
+        dot.addEventListener('mousemove', positionTooltip);
+        dot.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+      });
+
+      function positionTooltip(e) {
+        const rect = svg.parentElement.getBoundingClientRect();
+        tooltip.style.left = (e.clientX - rect.left) + 'px';
+        tooltip.style.top = (e.clientY - rect.top) + 'px';
+      }
+    } catch (e) {
+      svg.innerHTML = `<text class="chart-axis-label" x="450" y="160" text-anchor="middle">Failed to load: ${e.message}</text>`;
+    }
+  }
+
+  // ── Announcement feed ────────────────────────────────────────────────────
+  let feedKind = 'all';
+  let feedTicker = '';
+  let feedRows = [];
+  let feedGrouped = false;
+  let feedSessionDate = null;   // the ASX session the feed is pinned to, or null for "newest N"
+  const expanded = new Set();
+  let sortKey = null;   // null = natural API order (newest first)
+  let sortAsc = false;
+
+  const SORT_EXTRACTORS = {
+    time: r => new Date(r.released_at || r.seen_at).getTime(),
+    ticker: r => r.ticker,
+    company: r => r.company,
+    sector: r => r.sector,
+    rank: r => r.universe_rank,
+    signal: r => r.signal,
+    score: r => r.score,
+    headline: r => r.headline,
+  };
+  const NUMERIC_SORT_KEYS = new Set(['time', 'rank', 'score']);
+
+  function setFeedKind(k) {
+    feedKind = k;
+    document.querySelectorAll('.filters button[data-kind]').forEach(b => b.classList.toggle('active', b.dataset.kind === k));
+    loadFeed();
+  }
+
+  function sortBy(key) {
+    if (sortKey === key) { sortAsc = !sortAsc; }
+    else { sortKey = key; sortAsc = key === 'ticker' || key === 'headline'; }
+    document.querySelectorAll('#feed-table-wrap th').forEach(th => th.classList.remove('sorted'));
+    // Guarded: `event` is the implicit global, which only exists when this is
+    // reached from the header's onclick. Unguarded it throws if sortBy is ever
+    // called any other way. Matches the scanner page's version.
+    if (typeof event !== 'undefined' && event && event.currentTarget) {
+      event.currentTarget.classList.add('sorted');
+    }
+    renderFeedTable();
+  }
+
+  // The label is the best-correlating sector index, always shown when known.
+  // A WEAK fit (below the benchmark threshold) is dimmed and marked with a
+  // degree sign rather than hidden: a micro-cap explorer is still an explorer
+  // even though its returns are mostly idiosyncratic, and the correlation in
+  // the tooltip says how much weight the label carries.
+  function sectorCell(r) {
+    if (!r.sector) return '<span class="time">—</span>';
+    const c = r.sector_corr != null ? ` r=${Number(r.sector_corr).toFixed(2)}` : '';
+    const tip = `${r.sector_index || ''}${c}${r.sector_weak ? ' — weak fit, not used as a benchmark' : ''}`;
+    return `<span class="${r.sector_weak ? 'sector-weak' : ''}" title="${escapeHtml(tip)}">`
+      + `${escapeHtml(r.sector)}${r.sector_weak ? '°' : ''}</span>`;
+  }
+
+  function renderFeedTable() {
+    let rows = feedRows;
+    if (sortKey) {
+      const extract = SORT_EXTRACTORS[sortKey];
+      const numeric = NUMERIC_SORT_KEYS.has(sortKey);
+      rows = feedRows.slice().sort((a, b) => {
+        let av = extract(a), bv = extract(b);
+        if (numeric) {
+          av = (av == null || Number.isNaN(av)) ? (sortAsc ? Infinity : -Infinity) : av;
+          bv = (bv == null || Number.isNaN(bv)) ? (sortAsc ? Infinity : -Infinity) : bv;
+          return sortAsc ? av - bv : bv - av;
+        }
+        av = av || ''; bv = bv || '';
+        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+    }
+
+    // Say WHICH session is on screen, not just how many rows. Without it a
+    // quiet morning looks identical to the filter having silently failed.
+    const scope = feedTicker
+      ? ` matching ${feedTicker} · all stored sessions`
+      : (feedSessionDate
+          ? ` · ${new Date(feedSessionDate + 'T00:00:00').toLocaleDateString('en-AU',
+              { weekday: 'short', day: 'numeric', month: 'short' })} session`
+          : ' · last few sessions');
+    const countEl = document.getElementById('feed-count');
+    countEl.textContent =
+      (feedGrouped ? `${rows.length} companies` : `${rows.length} announcements`) + scope;
+    countEl.classList.toggle('searching', !!feedTicker);
+    document.getElementById('feed-body').innerHTML = rows.map(r => {
+      let flags = '';
+      if (r.is_halt) flags += `<span class="badge halt">${(r.halt_kind || 'halt').toUpperCase()}</span> `;
+      if (r.price_sensitive) flags += '<span class="badge ps">PS</span> ';
+      if (r.keyword_flags && r.keyword_flags.length) {
+        flags += r.keyword_flags.map(k => `<span class="badge keyword" title="Mentioned in the PDF body">🔍 ${escapeHtml(k)}</span>`).join(' ');
+      }
+      const link = r.url ? `<a class="pdf-link" href="${r.url}" target="_blank" rel="noopener">PDF</a>` : '';
+      const signalCell = r.signal
+        ? `<span class="badge signal-${r.signal.toLowerCase()}" title="${escapeHtml(r.signal_reason || '')}">${r.signal}</span>`
+        : '<span class="time">—</span>';
+      // A net score and a single-announcement score are different claims, so
+      // they are labelled differently rather than shown as one anonymous number.
+      let scoreCell = r.score != null ? String(r.score) : '<span class="time">—</span>';
+      if (feedGrouped && r.score != null) {
+        const spread = (r.score_range && r.score_range[0] !== r.score_range[1])
+          ? ` <span class="time" title="individual announcement scores ranged ${r.score_range[0]}–${r.score_range[1]}">(${r.score_range[0]}–${r.score_range[1]})</span>` : '';
+        scoreCell = `${r.score}${r.is_net ? ' <span class="time" title="Net score for all of this company\'s announcements this session">net</span>' : ''}${spread}`;
+      }
+      const key = feedGrouped ? `${r.ticker}|${r.session_date}` : null;
+      const isOpen = key && expanded.has(key);
+      const caret = (feedGrouped && r.n_announcements > 1)
+        ? `<span class="pdf-link" style="cursor:pointer" onclick="toggleGroup('${key}')">${isOpen ? '▾' : '▸'} ${r.n_announcements}</span> `
+        : '';
+      const main = `<tr>
+        <td class="time">${feedTicker && r.session_date
+          ? r.session_date : fmtTime(r.latest_at || r.released_at || r.seen_at)}</td>
+        <td>${caret}<strong>${r.ticker}</strong></td>
+        <td class="company" title="${escapeHtml(r.company || '')}">${r.company ? escapeHtml(r.company) : '<span class="time">—</span>'}</td>
+        <td class="sector">${sectorCell(r)}</td>
+        <td class="time">${r.universe_rank != null ? '#' + r.universe_rank : '—'}</td>
+        <td>${flags}</td>
+        <td>${signalCell}</td>
+        <td>${scoreCell}</td>
+        <td class="headline">${escapeHtml(r.headline)}</td>
+        <td>${link}</td>
+        <td><button class="btn" data-watch="${r.ticker}" title="Add to watchlist">+ Watch</button></td>
+      </tr>`;
+      if (!isOpen || !r.children) return main;
+      const kids = r.children.map(c => `<tr style="background:rgba(255,255,255,0.02)">
+        <td class="time">${fmtTime(c.released_at || c.seen_at)}</td>
+        <td></td><td></td><td></td><td></td>
+        <td>${c.is_halt ? '<span class="badge halt">HALT</span> ' : ''}${c.price_sensitive ? '<span class="badge ps">PS</span>' : ''}</td>
+        <td>${c.signal ? `<span class="badge signal-${c.signal.toLowerCase()}" title="${escapeHtml(c.signal_reason || '')}">${c.signal}</span>` : '<span class="time">—</span>'}</td>
+        <td>${c.score != null ? c.score : '<span class="time">—</span>'}</td>
+        <td class="headline" style="padding-left:18px">${escapeHtml(c.headline)}</td>
+        <td>${c.url ? `<a class="pdf-link" href="${c.url}" target="_blank" rel="noopener">PDF</a>` : ''}</td>
+        <td></td>
+      </tr>`).join('');
+      return main + kids;
+    }).join('');
+
+    document.querySelectorAll('#feed-body button[data-watch]').forEach(b => b.onclick = () => {
+      const t = b.dataset.watch;
+      const row = rows.find(x => x.ticker === t) || {};
+      addToWatchlist(b, {
+        ticker: t, company: row.company || null, source: 'announcements',
+        ai_score: row.score ?? null, headline: row.headline || null, url: row.url || null,
+      });
+    });
+  }
+
+  // Confirms on the button itself rather than with an alert -- adding a
+  // watchlist entry is cheap and reversible, so interrupting the reading flow
+  // for it would be noise. Re-adding an existing ticker refreshes its context
+  // and reports "Updated" rather than failing.
+  async function addToWatchlist(btn, payload) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/watchlist', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const d = await r.json();
+      btn.textContent = d.added ? '✓ Watching' : '✓ Updated';
+    } catch (e) {
+      btn.textContent = '✕ failed';
+      btn.title = String(e.message || e);
+    }
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2500);
+  }
+
+  function toggleGroup(key) {
+    if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
+    renderFeedTable();
+  }
+
+  async function loadFeed() {
+    const loading = document.getElementById('feed-loading');
+    const errorEl = document.getElementById('feed-error');
+    const wrap = document.getElementById('feed-table-wrap');
+    loading.style.display = 'block';
+    errorEl.style.display = 'none';
+    try {
+      const universeOnly = document.getElementById('universe-toggle').checked;
+      const grouped = document.getElementById('group-toggle').checked;
+      const todayOnly = document.getElementById('today-toggle').checked;
+      // A full ASX session runs to ~700 announcements, well past the old 300
+      // cap -- with the day filter on, that cap would quietly truncate the
+      // morning rather than showing the whole session the toggle promises.
+      const limit = todayOnly ? 1000 : 300;
+      // A ticker search deliberately ignores the day and kind filters and
+      // widens the limit: the usual reason to search is an announcement from
+      // an earlier session, which the default today-only view cannot show.
+      const searching = feedTicker.length > 0;
+      const res = await fetch(searching
+        ? `/api/asx/feed?limit=600&kind=all&universe_only=false`
+          + `&group=${grouped}&ticker=${encodeURIComponent(feedTicker)}`
+        : `/api/asx/feed?limit=${limit}&kind=${feedKind}`
+          + `&universe_only=${universeOnly}&group=${grouped}${todayOnly ? '&day=today' : ''}`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      feedRows = data.items || [];
+      feedGrouped = !!data.grouped;
+      feedSessionDate = data.session_date || null;
+      renderFeedTable();
+      loading.style.display = 'none';
+      wrap.style.display = feedRows.length ? 'block' : 'none';
+      if (!feedRows.length) {
+        loading.textContent = todayOnly
+          ? `No announcements yet for ${feedSessionDate || 'today'}.`
+          : 'No announcements yet.';
+        loading.style.display = 'block';
+      }
+    } catch (e) {
+      loading.style.display = 'none';
+      errorEl.style.display = 'block';
+      errorEl.textContent = 'Failed to load feed: ' + e.message;
+    }
+  }
+
+  async function classifyNow() {
+    const btn = document.getElementById('classify-btn');
+    btn.disabled = true;
+    btn.textContent = 'Classifying…';
+    try {
+      const res = await fetch('/api/asx/signals/refresh?limit=60', { method: 'POST' });
+      const data = await res.json();
+      if (data.error) {
+        btn.textContent = data.error === 'grok OAuth not configured' ? 'Not set up' : 'Error';
+      } else {
+        btn.textContent = `⚡ Classified ${data.classified}`;
+        await loadFeed();
+      }
+    } catch (e) {
+      btn.textContent = 'Error';
+    } finally {
+      setTimeout(() => { btn.disabled = false; btn.textContent = '⚡ Classify now'; }, 4000);
+    }
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  // ── Collector health ─────────────────────────────────────────────────────
+  async function loadCollectorStatus() {
+    const dot = document.getElementById('collector-dot');
+    const text = document.getElementById('collector-text');
+    try {
+      const res = await fetch('/api/asx/health');
+      const h = await res.json();
+      if (!h.available) {
+        dot.className = 'dot bad';
+        text.textContent = 'collector offline';
+        return;
+      }
+      dot.className = h.last_poll_ok ? 'dot ok' : 'dot bad';
+      const mins = h.last_poll_ts ? Math.round((Date.now() - new Date(h.last_poll_ts).getTime()) / 60000) : null;
+      const uni = h.universe_size ? ` · top ${h.universe_size} loaded` : '';
+      text.textContent = (mins != null ? `${h.count} collected · updated ${mins}m ago` : `${h.count} collected`) + uni;
+    } catch (e) {
+      dot.className = 'dot bad';
+      text.textContent = 'collector unreachable';
+    }
+  }
+
+  // Provider call counter. The point of this readout is that it counts calls
+  // where they actually happen: `signals`/`ticker_signals` row counts look like
+  // usage but are upserts, so a net re-computed 144 times still reads as one.
+  async function loadUsage() {
+    const el = document.getElementById('llm-usage');
+    if (!el) return;
+    try {
+      const r = await fetch('/api/asx/signals/usage?days=14');
+      if (!r.ok) return;
+      const u = await r.json();
+      const t = u.today || {};
+      const cap = u.free_tier_daily;
+      const pct = cap ? Math.round(100 * (t.total || 0) / cap) : null;
+      const mean = u.mean_complete_day != null
+        ? ` · ${u.mean_complete_day}/day avg over ${u.n_complete_days}d` : '';
+      const fail = t.failed ? ` · ${t.failed} failed` : '';
+      el.textContent = `⚡ ${t.total || 0} ${u.provider} calls today `
+        + `(${t.classify || 0} classify + ${t.net || 0} net)`
+        + (pct != null ? ` · ${pct}% of ${cap}/day` : '') + mean + fail;
+      el.style.color = (pct != null && pct >= 80) ? 'var(--sell)' : '';
+      el.title = u.logging_since
+        ? `Counting since ${u.logging_since}. Days are UTC, which is the clock a provider quota resets on — not the ASX session.`
+        : 'No provider calls recorded yet.';
+    } catch (e) { /* the counter must never break the page */ }
+  }
+  loadUsage();
+  setInterval(loadUsage, 120000);
+
+  fetch('/api/auth/status').then(r => r.json()).then(d => {
+    if (d.authenticated) {
+      document.getElementById('analysis-nav-link').style.display = '';
+      document.getElementById('reports-nav-link').style.display = '';
+      document.getElementById('sync-nav-link').style.display = '';
+      document.getElementById('logout-nav-link').style.display = '';
+    }
+  }).catch(() => {});
+
+  // ── Ticker search ───────────────────────────────────────────────────────
+  let searchTimer = null;
+  function applyFeedSearch(v) {
+    feedTicker = (v || '').trim().toUpperCase();
+    document.getElementById('feed-search-clear').hidden = !feedTicker;
+    loadFeed();
+  }
+  document.getElementById('feed-search').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    // Debounced: each keystroke is a query across every stored session.
+    searchTimer = setTimeout(() => applyFeedSearch(e.target.value), 300);
+  });
+  document.getElementById('feed-search').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { clearTimeout(searchTimer); applyFeedSearch(e.target.value); }
+    if (e.key === 'Escape') { e.target.value = ''; applyFeedSearch(''); }
+  });
+  document.getElementById('feed-search-clear').onclick = () => {
+    document.getElementById('feed-search').value = '';
+    applyFeedSearch('');
+  };
+
+  loadSnapshot();
+  loadSectors();
+  loadYieldCurve();
+  loadFeed();
+  loadCollectorStatus();
+
+  setInterval(loadSnapshot, 5 * 60 * 1000);
+  setInterval(loadSectors, 5 * 60 * 1000);
+  setInterval(loadFeed, 60 * 1000);
+  setInterval(loadCollectorStatus, 60 * 1000);
+</script>
+</body>
+</html>

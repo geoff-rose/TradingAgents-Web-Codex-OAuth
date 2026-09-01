@@ -71,9 +71,14 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
     )
 
+    cached_empty = False
     if os.path.exists(data_file):
         data = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-    else:
+        # Treat a cache file with no data rows as stale — re-fetch and overwrite
+        if len(data) == 0:
+            cached_empty = True
+
+    if not os.path.exists(data_file) or cached_empty:
         data = yf_retry(lambda: yf.download(
             symbol,
             start=start_str,
@@ -127,7 +132,11 @@ class StockstatsUtils:
         matching_rows = df[df["Date"].str.startswith(curr_date_str)]
 
         if not matching_rows.empty:
-            indicator_value = matching_rows[indicator].values[0]
-            return indicator_value
-        else:
-            return "N/A: Not a trading day (weekend or holiday)"
+            return matching_rows[indicator].values[0]
+
+        # curr_date is a weekend or holiday — use the most recent trading day
+        if not df.empty:
+            last = df.iloc[-1]
+            val = last[indicator]
+            return val if not pd.isna(val) else "N/A"
+        return "N/A"

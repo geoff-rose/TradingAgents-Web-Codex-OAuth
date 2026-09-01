@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swing Trade — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .section-note { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  section { margin-bottom: 36px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }
+
+  .universe-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .universe-chip {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;
+    user-select: none;
+  }
+  .universe-chip.on { border-color: var(--accent); }
+  .universe-chip input { accent-color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .pos { color: var(--buy); }
+  .neg { color: var(--sell); }
+  .neu { color: var(--muted); }
+
+  .btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { opacity: 0.85; color: #fff; }
+  .btn.danger:hover { border-color: var(--sell); color: var(--sell); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.proposed { background: rgba(245,158,11,0.15); color: var(--hold); }
+  .badge.submitted { background: rgba(56,139,253,0.15); color: var(--accent); }
+  .badge.open { background: rgba(34,197,94,0.15); color: var(--buy); }
+  .badge.closed { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .badge.rejected, .badge.error { background: rgba(239,68,68,0.15); color: var(--sell); }
+
+  .pnl-tiles { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .pnl-tile { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; min-width: 120px; }
+  .pnl-tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .pnl-tile .value { font-size: 18px; font-weight: 700; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  .msg { font-size: 12px; margin-top: 8px; }
+  .msg.err { color: var(--sell); }
+  .msg.ok { color: var(--buy); }
+  .rationale { color: var(--muted); font-size: 11px; max-width: 260px; white-space: normal; }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance">Performance</a>
+    <a href="/asx">ASX</a>
+    <a href="/research">Patterns</a>
+    <a href="/swing" class="active">Swing</a>
+    <a href="/backtest">Backtest</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/watchlist">Watchlist</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="page">
+  <h1>Swing Trade</h1>
+  <p class="subtitle">Simulated swing trading on the paper IBKR account — fitted range-model proposals you approve, entry/target refreshed daily, tracked through to fill and P&amp;L.</p>
+
+  <section>
+    <h2>Trade Size &amp; Model Percentiles</h2>
+    <p class="section-note">Trade size applies to the next proposal scan, not retroactively. Entry/target percentiles control the range model (phase-3 §6): entry_q is how deep a pullback to wait for (lower = rarer, deeper dips only); target_q is how far a rally to aim for. Expect these to need refinement — the defaults are from one backtest sweep on a small out-of-sample sample, not a final answer.</p>
+    <div class="card">
+      <div class="add-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="color:var(--muted)">$</span>
+        <input id="trade-dollars-input" type="number" min="1" step="100" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;width:120px">
+        <span style="color:var(--muted)">per trade</span>
+        <span style="color:var(--muted);margin-left:12px">entry_q</span>
+        <input id="entry-q-input" type="number" min="0.01" max="0.99" step="0.05" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;width:80px">
+        <span style="color:var(--muted)">target_q</span>
+        <input id="target-q-input" type="number" min="0.01" max="0.99" step="0.05" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;width:80px">
+        <button class="btn primary" onclick="saveSettings()">Save</button>
+        <span class="msg" id="settings-msg"></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Swing Universe</h2>
+    <p class="section-note">Which of your Focus Tickers (Patterns page) get a daily swing-trade check. Click to toggle.</p>
+    <div class="card">
+      <div class="universe-row" id="universe-row"></div>
+      <div class="msg" id="universe-msg"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Proposed Trades</h2>
+    <p class="section-note">From today's fitted range-model scan — approve to send a day-only limit entry to the paper IBKR account (expires at end of day if unfilled, a fresh one is quoted tomorrow), or reject to discard. Once filled, a fixed protective stop is placed and the target is re-quoted fresh every trading day the position stays open.</p>
+    <div class="card">
+      <table id="proposed-table">
+        <thead><tr><th>Ticker</th><th>Entry</th><th>Target</th><th>Stop</th><th>Shares</th><th>$ Size</th><th>Rationale</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="proposed-empty" style="display:none">No proposals right now — either nothing qualifies today, or every enabled ticker already has an active trade.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Open Positions</h2>
+    <p class="section-note">Bracket submitted or filled — waiting on target or stop.</p>
+    <div class="card">
+      <table id="open-table">
+        <thead><tr><th>Ticker</th><th>Status</th><th>Entry</th><th>Target</th><th>Stop</th><th>Shares</th><th>Entered</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="open-empty" style="display:none">No open or working trades.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Closed Trades &amp; P&amp;L</h2>
+    <div class="pnl-tiles">
+      <div class="pnl-tile"><div class="label">Today</div><div class="value" id="pnl-today">—</div></div>
+      <div class="pnl-tile"><div class="label">This Month</div><div class="value" id="pnl-month">—</div></div>
+      <div class="pnl-tile"><div class="label">All Time</div><div class="value" id="pnl-alltime">—</div></div>
+    </div>
+    <div class="card">
+      <table id="closed-table">
+        <thead><tr><th>Ticker</th><th>Entry</th><th>Exit</th><th>Shares</th><th>Exit Reason</th><th>Closed</th><th>P&amp;L</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="closed-empty" style="display:none">No closed trades yet.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Expired / Not Filled</h2>
+    <p class="section-note">Day-only entries that didn't fill by end of day — expected fairly often at a deep entry_q, since it's specifically waiting for a pullback that may not come. A fresh proposal is generated the next day, not a retry of the same price.</p>
+    <div class="card">
+      <table id="expired-table">
+        <thead><tr><th>Ticker</th><th>Proposed</th><th>Entry</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="expired-empty" style="display:none">None recently.</div>
+    </div>
+  </section>
+</div>
+
+<script>
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+  function fmtMoney(v) {
+    if (v == null) return '—';
+    const sign = v > 0 ? '+' : '';
+    return sign + '$' + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function pnlClass(v) { return v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu'; }
+  function fmtDate(s) { return s ? s.replace('T', ' ').replace('Z', '') : '—'; }
+
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/swing/settings');
+      const data = await res.json();
+      document.getElementById('trade-dollars-input').value = data.trade_dollars;
+      document.getElementById('entry-q-input').value = data.entry_q;
+      document.getElementById('target-q-input').value = data.target_q;
+    } catch (e) {
+      document.getElementById('settings-msg').textContent = 'Failed to load: ' + e.message;
+      document.getElementById('settings-msg').className = 'msg err';
+    }
+  }
+
+  async function saveSettings() {
+    const dollars = parseFloat(document.getElementById('trade-dollars-input').value);
+    const entryQ = parseFloat(document.getElementById('entry-q-input').value);
+    const targetQ = parseFloat(document.getElementById('target-q-input').value);
+    const msg = document.getElementById('settings-msg');
+    if (!dollars || dollars <= 0) {
+      msg.textContent = 'Enter a positive trade size';
+      msg.className = 'msg err';
+      return;
+    }
+    try {
+      const res = await fetch('/api/swing/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trade_dollars: dollars, entry_q: entryQ, target_q: targetQ }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'failed');
+      msg.textContent = 'Saved — applies to the next proposal scan';
+      msg.className = 'msg ok';
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = 'msg err';
+    }
+  }
+
+  async function loadUniverse() {
+    try {
+      const res = await fetch('/api/swing/universe');
+      const data = await res.json();
+      const row = document.getElementById('universe-row');
+      row.innerHTML = data.tickers.map(t => `
+        <label class="universe-chip ${t.enabled ? 'on' : ''}" onclick="event.preventDefault(); toggleTicker('${t.ticker}', ${!t.enabled})">
+          <input type="checkbox" ${t.enabled ? 'checked' : ''} readonly>
+          <span>${escapeHtml(t.ticker)}</span>
+        </label>
+      `).join('') || '<span class="empty">No focus tickers yet — add some on the Patterns page first.</span>';
+    } catch (e) {
+      document.getElementById('universe-msg').textContent = 'Failed to load: ' + e.message;
+      document.getElementById('universe-msg').className = 'msg err';
+    }
+  }
+
+  async function toggleTicker(ticker, enabled) {
+    try {
+      await fetch(`/api/swing/universe/${encodeURIComponent(ticker)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      await loadUniverse();
+    } catch (e) {
+      document.getElementById('universe-msg').textContent = e.message;
+      document.getElementById('universe-msg').className = 'msg err';
+    }
+  }
+
+  async function approveTrade(id, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const res = await fetch(`/api/swing/trades/${id}/approve`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'failed');
+      await loadTrades();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Approve';
+      alert('Approve failed: ' + e.message);
+    }
+  }
+
+  async function rejectTrade(id, btn) {
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/swing/trades/${id}/reject`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'failed');
+      await loadTrades();
+    } catch (e) {
+      btn.disabled = false;
+      alert('Reject failed: ' + e.message);
+    }
+  }
+
+  async function loadTrades() {
+    const res = await fetch('/api/swing/trades');
+    const data = await res.json();
+    const trades = data.trades;
+
+    const proposed = trades.filter(t => t.status === 'proposed');
+    const proposedBody = document.querySelector('#proposed-table tbody');
+    proposedBody.innerHTML = proposed.map(t => `
+      <tr>
+        <td>${escapeHtml(t.ticker)}</td>
+        <td>${t.entry_price.toFixed(3)}</td>
+        <td>${t.target_price.toFixed(3)}</td>
+        <td>${t.stop_price.toFixed(3)}</td>
+        <td>${t.shares}</td>
+        <td>$${t.dollar_size.toLocaleString()}</td>
+        <td class="rationale">${escapeHtml(t.rationale || '')}</td>
+        <td>
+          <button class="btn primary" onclick="approveTrade(${t.id}, this)">Approve</button>
+          <button class="btn danger" onclick="rejectTrade(${t.id}, this)">Reject</button>
+        </td>
+      </tr>
+    `).join('');
+    document.getElementById('proposed-empty').style.display = proposed.length ? 'none' : '';
+    document.getElementById('proposed-table').style.display = proposed.length ? '' : 'none';
+
+    const open = trades.filter(t => t.status === 'submitted' || t.status === 'open');
+    const openBody = document.querySelector('#open-table tbody');
+    openBody.innerHTML = open.map(t => `
+      <tr>
+        <td>${escapeHtml(t.ticker)}</td>
+        <td><span class="badge ${t.status}">${t.status}</span></td>
+        <td>${(t.entry_fill_price ?? t.entry_price).toFixed(3)}</td>
+        <td>${t.target_price.toFixed(3)}</td>
+        <td>${t.stop_price.toFixed(3)}</td>
+        <td>${t.shares}</td>
+        <td>${fmtDate(t.entered_at)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('open-empty').style.display = open.length ? 'none' : '';
+    document.getElementById('open-table').style.display = open.length ? '' : 'none';
+
+    const closed = trades.filter(t => t.status === 'closed');
+    const closedBody = document.querySelector('#closed-table tbody');
+    closedBody.innerHTML = closed.map(t => `
+      <tr>
+        <td>${escapeHtml(t.ticker)}</td>
+        <td>${(t.entry_fill_price ?? t.entry_price).toFixed(3)}</td>
+        <td>${(t.exit_fill_price ?? 0).toFixed(3)}</td>
+        <td>${t.shares}</td>
+        <td><span class="badge ${t.exit_reason === 'target' ? 'open' : 'error'}">${escapeHtml(t.exit_reason || '')}</span></td>
+        <td>${fmtDate(t.exited_at)}</td>
+        <td class="${pnlClass(t.pnl)}">${fmtMoney(t.pnl)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('closed-empty').style.display = closed.length ? 'none' : '';
+    document.getElementById('closed-table').style.display = closed.length ? '' : 'none';
+
+    const expired = trades.filter(t => t.status === 'expired' || t.status === 'error' || t.status === 'rejected');
+    const expiredBody = document.querySelector('#expired-table tbody');
+    expiredBody.innerHTML = expired.map(t => `
+      <tr>
+        <td>${escapeHtml(t.ticker)}</td>
+        <td>${escapeHtml(t.trade_date)}</td>
+        <td>${t.entry_price.toFixed(3)}</td>
+        <td><span class="badge ${t.status === 'expired' ? 'closed' : 'error'}">${escapeHtml(t.status)}${t.error ? ': ' + escapeHtml(t.error) : ''}</span></td>
+      </tr>
+    `).join('');
+    document.getElementById('expired-empty').style.display = expired.length ? 'none' : '';
+    document.getElementById('expired-table').style.display = expired.length ? '' : 'none';
+
+    const pnl = data.pnl;
+    for (const [id, key] of [['pnl-today', 'today'], ['pnl-month', 'month'], ['pnl-alltime', 'all_time']]) {
+      const el = document.getElementById(id);
+      el.textContent = fmtMoney(pnl[key]);
+      el.className = 'value ' + pnlClass(pnl[key]);
+    }
+  }
+
+  fetch('/api/auth/status').then(r => r.json()).then(d => {
+    if (d.authenticated) {
+      document.getElementById('analysis-nav-link').style.display = '';
+      document.getElementById('reports-nav-link').style.display = '';
+      document.getElementById('sync-nav-link').style.display = '';
+      document.getElementById('logout-nav-link').style.display = '';
+    }
+  }).catch(() => {});
+
+  loadSettings();
+  loadUniverse();
+  loadTrades();
+  setInterval(loadTrades, 60 * 1000);
+</script>
+</body>
+</html>

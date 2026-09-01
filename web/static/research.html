@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Patterns — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover { background: var(--surface2); color: var(--text); }
+  nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .section-note { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  section { margin-bottom: 36px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }
+
+  /* ── Ticker chips / table ── */
+  .ticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .ticker-chip {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; position: relative;
+  }
+  .ticker-chip .sym { font-weight: 700; font-size: 14px; }
+  .ticker-chip .stat { font-size: 11px; color: var(--muted); }
+  .ticker-chip .bars-ok { color: var(--buy); }
+  .ticker-chip .bars-none { color: var(--muted); }
+  .ticker-chip .remove {
+    position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 14px; line-height: 1; padding: 2px;
+  }
+  .ticker-chip .remove:hover { color: var(--sell); }
+  .empty-slot {
+    border: 1px dashed var(--border); border-radius: 8px; padding: 10px 12px;
+    color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center;
+  }
+
+  .add-row { display: flex; gap: 8px; align-items: center; }
+  .add-row input {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 10px; font-size: 13px; width: 140px; text-transform: uppercase;
+  }
+  .btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { opacity: 0.85; color: #fff; }
+  .count-pill { font-size: 12px; color: var(--muted); }
+
+  /* ── Backfill ── */
+  .backfill-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .backfill-controls select {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 10px; font-size: 13px;
+  }
+  .estimate { color: var(--muted); font-size: 12px; }
+  .log-tail {
+    background: #010409; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;
+    font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--muted);
+    white-space: pre-wrap; max-height: 220px; overflow-y: auto; display: none;
+  }
+  .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 10px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+
+  /* ── IC table ──────────────────────────────────────────────────────────
+     Ruled both ways on purpose. This table is read by comparing a row
+     against the benchmark scale and a column against its neighbours, and
+     without gridlines nine numeric columns of similar magnitude blur into
+     each other. */
+  #ic-table, #hyp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #ic-table th, #ic-table td, #hyp-table th, #hyp-table td { border: 1px solid var(--border); padding: 7px 10px; }
+  #ic-table thead th, #hyp-table thead th {
+    background: var(--surface2); color: var(--muted); font-weight: 600;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    white-space: nowrap; text-align: left; vertical-align: bottom;
+  }
+  #ic-table thead th.num, #hyp-table thead th.num { text-align: right; }
+  #ic-table tbody td, #hyp-table tbody td { font-variant-numeric: tabular-nums; }
+  #ic-table tbody td.num, #hyp-table tbody td.num { text-align: right; }
+  #ic-table tbody tr:nth-child(even) td, #hyp-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  #ic-table tbody tr:hover td, #hyp-table tbody tr:hover td { background: rgba(255,255,255,0.05); }
+  #ic-table tbody td:first-child, #hyp-table tbody td:first-child { white-space: nowrap; color: var(--text); }
+  /* The two columns that carry the answer, lifted out of the noise. */
+  #ic-table th:nth-child(6), #ic-table td:nth-child(6) { border-left-width: 2px; }
+  #ic-table th:nth-child(8), #ic-table td:nth-child(8) { border-left-width: 2px; }
+  #ic-table .pos, #hyp-table .pos { color: var(--buy, #3fb950); }
+  #ic-table .neg, #hyp-table .neg { color: var(--sell, #f85149); }
+  #ic-table .msg, #hyp-table .msg { font-size: 11px; color: var(--muted); }
+  #ic-table thead .msg, #hyp-table thead .msg { text-transform: none; letter-spacing: 0; }
+  .badge-v { padding:2px 7px; border-radius:10px; font-size:11px; font-weight:600; }
+  .badge-v.rejected { background:rgba(239,68,68,.15); color:var(--sell); }
+  .badge-v.survived { background:rgba(34,197,94,.15); color:var(--buy); }
+  .badge-v.inconclusive { background:rgba(255,255,255,.07); color:var(--muted); }
+  .dot.running { background: var(--hold); animation: pulse 1.5s ease-in-out infinite; }
+  .dot.idle { background: var(--border); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  .placeholder { text-align: center; color: var(--muted); padding: 48px 20px; }
+  .placeholder .big { font-size: 15px; color: var(--text); margin-bottom: 6px; }
+  .msg { font-size: 12px; margin-top: 8px; }
+  .msg.err { color: var(--sell); }
+  .msg.ok { color: var(--buy); }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance">Performance</a>
+    <a href="/asx">ASX</a>
+    <a href="/research" class="active">Patterns</a>
+    <a href="/swing">Swing</a>
+    <a href="/backtest">Backtest</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/watchlist">Watchlist</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="page">
+  <h1>Patterns</h1>
+  <p class="subtitle">Intraday day-shape research basket — your focus tickers, recommended ones, backfill status, and identified patterns.</p>
+
+  <section>
+    <h2>Focus Tickers</h2>
+    <p class="section-note">Yours — the ones you're most interested in watching for intraday patterns. Up to 10.</p>
+    <div class="card">
+      <div class="ticker-grid" id="focus-grid"></div>
+      <div class="add-row">
+        <input id="focus-input" placeholder="e.g. BHP" maxlength="6" onkeydown="if(event.key==='Enter') addFocus()">
+        <button class="btn primary" onclick="addFocus()">Add</button>
+        <span class="count-pill" id="focus-count"></span>
+      </div>
+      <div class="msg" id="focus-msg"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Recommended Tickers</h2>
+    <p class="section-note">Picked by volatility and liquidity (weighted toward volatility) — the shapes you're asking about show up more in higher-vol names. Up to 40.</p>
+    <div class="card">
+      <div class="ticker-grid" id="recommended-grid"></div>
+      <div class="add-row">
+        <button class="btn" id="recommend-btn" onclick="regenerateRecommended()">↻ Regenerate recommendations</button>
+        <span class="count-pill" id="recommended-count"></span>
+      </div>
+      <div class="msg" id="recommend-msg"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Hypothesis Ledger</h2>
+    <p class="note" style="margin-bottom:10px">
+      Every idea put through the gate battery, with the gate that killed it. This is the
+      <strong>multiple-testing denominator</strong> — "one survivor out of a dozen" has to be a
+      query, not a recollection. <strong>Survived</strong> means <em>not yet shown to be an
+      artifact</em>, never <em>tradeable</em>.
+    </p>
+    <div class="card">
+      <div id="hyp-tally" class="note" style="margin-bottom:10px"></div>
+      <div style="overflow-x:auto">
+        <table id="hyp-table">
+          <thead><tr>
+            <th>Hypothesis</th><th class="num">Trades</th><th class="num">Gross</th>
+            <th class="num">Net</th><th>Verdict</th><th>Killed by / awaiting</th>
+            <th class="num">Variants</th>
+          </tr></thead>
+          <tbody id="hyp-body"><tr><td colspan="7" class="msg">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Classifier Information Coefficient</h2>
+    <p class="note" style="margin-bottom:10px">
+      Each day, the scored names are ranked by AI score and ranked again by the return they
+      actually delivered; the correlation between those two orderings is that day's IC. Computing it
+      <em>within</em> a day and only then averaging makes it market-neutral by construction — it only
+      ever asks whether the higher-scored names beat the lower-scored ones <em>that day</em>.
+      <br><br>
+      <strong>IC (Pearson)</strong> correlates the raw score against the raw return, so a single
+      large mover dominates it. <strong>Rank IC (Spearman)</strong> correlates only the two
+      <em>orderings</em>, so it asks the question you actually care about — did the score sort them
+      correctly — and is not hijacked by one outlier. <strong>Read Rank IC.</strong>
+      On 2026-08-28 the two were +0.26 and +0.088 on the same data, the gap being one stock that
+      fell 12.6%.
+      <br><br>
+      <strong>ICIR</strong> is the mean divided by its own spread across days: consistency, not size.
+      A score that is right by a little every single day beats one that averages the same while
+      swinging wildly.
+    </p>
+    <div class="card">
+      <div style="overflow-x:auto">
+        <table id="ic-table">
+          <thead><tr>
+            <th>Horizon</th>
+            <th class="num" title="Trading days with at least the minimum number of scored names">Dates</th>
+            <th class="num" title="Median size of the daily cross-section">Names/day</th>
+            <th class="num" title="Pearson correlation between score and return, per day, averaged. Outlier-sensitive.">IC <span class="msg">(Pearson)</span></th>
+            <th class="num" title="Mean IC divided by its standard deviation across days">ICIR</th>
+            <th class="num" title="Spearman correlation between the score RANKING and the return RANKING, per day, averaged. The robust one — read this.">Rank IC <span class="msg">(Spearman)</span></th>
+            <th class="num" title="Mean Rank IC divided by its standard deviation across days">Rank ICIR</th>
+            <th class="num" title="Rank ICIR x sqrt(dates). Above 2 is conventionally settled.">t</th>
+            <th class="num" title="Trading days this row's own consistency needs to reach t=2">Dates needed</th>
+          </tr></thead>
+          <tbody id="ic-body"><tr><td colspan="9" class="msg">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="note" id="ic-scale" style="margin-top:12px"></p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Historical Data Backfill</h2>
+    <p class="section-note">1-minute TRADES + MIDPOINT bars via IBKR, for everything in the basket above. Chunked one day at a time — slower than it sounds, see the estimate below before starting.</p>
+    <div class="card">
+      <div class="status-line">
+        <span class="dot" id="backfill-dot"></span>
+        <span id="backfill-status-text">checking…</span>
+      </div>
+      <div class="backfill-controls">
+        <label for="years-select" style="color:var(--muted);font-size:13px">Lookback:</label>
+        <select id="years-select" onchange="updateEstimate()">
+          <option value="0.08">~30 days</option>
+          <option value="0.25" selected>~90 days</option>
+          <option value="1">1 year</option>
+          <option value="5">5 years</option>
+        </select>
+        <span class="estimate" id="backfill-estimate"></span>
+        <button class="btn primary" id="backfill-btn" onclick="startBackfill()">Start Backfill</button>
+      </div>
+      <div class="msg" id="backfill-msg"></div>
+      <div class="log-tail" id="backfill-log"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Identified Patterns</h2>
+    <p class="section-note">Day-shape clusters found in the backfilled data, with base rates and the TRADES-vs-MIDPOINT check (a pattern that only shows up in TRADES is spread, not real flow).</p>
+    <div class="card">
+      <div class="placeholder">
+        <div class="big">No patterns identified yet</div>
+        <div>The clustering analysis hasn't been run — this fills in once there's enough backfilled history to work with.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  function fmtPct(v) { return v == null ? '—' : (v * 100).toFixed(0) + '%'; }
+  function fmtDollar(v) {
+    if (v == null) return '—';
+    if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M/day';
+    if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K/day';
+    return '$' + v.toFixed(0) + '/day';
+  }
+
+  function barsLabel(bars) {
+    if (!bars || !bars.count) return '<span class="stat bars-none">no bars yet</span>';
+    const earliest = bars.earliest ? bars.earliest.slice(0, 10) : '?';
+    const latest = bars.latest ? bars.latest.slice(0, 10) : '?';
+    return `<span class="stat bars-ok">${bars.count.toLocaleString()} bars · ${earliest} → ${latest}</span>`;
+  }
+
+  function renderChip(row, removable) {
+    const stats = row.kind === 'recommended'
+      ? `<span class="stat">vol ${fmtPct(row.volatility)} · ${fmtDollar(row.dollar_volume)}</span>`
+      : '';
+    const removeBtn = removable ? `<button class="remove" onclick="removeTicker('${row.ticker}')" title="Remove">✕</button>` : '';
+    return `<div class="ticker-chip">
+      ${removeBtn}
+      <span class="sym">${row.ticker}</span>
+      ${stats}
+      ${barsLabel(row.bars)}
+    </div>`;
+  }
+
+  let universeCache = null;
+
+  async function loadUniverse() {
+    try {
+      const res = await fetch('/api/research/universe');
+      const data = await res.json();
+      universeCache = data;
+
+      const focusGrid = document.getElementById('focus-grid');
+      focusGrid.innerHTML = data.focus.map(r => renderChip(r, true)).join('') +
+        Array.from({ length: Math.max(0, data.focus_limit - data.focus.length) })
+          .map(() => '<div class="empty-slot">empty slot</div>').join('');
+      document.getElementById('focus-count').textContent = `${data.focus.length} / ${data.focus_limit}`;
+
+      const recGrid = document.getElementById('recommended-grid');
+      recGrid.innerHTML = data.recommended.length
+        ? data.recommended.map(r => renderChip(r, true)).join('')
+        : '<div class="empty-slot" style="grid-column:1/-1">no recommendations yet — click Regenerate below</div>';
+      document.getElementById('recommended-count').textContent = `${data.recommended.length} / ${data.recommended_limit}`;
+
+      updateEstimate();
+    } catch (e) {
+      document.getElementById('focus-msg').textContent = 'Failed to load: ' + e.message;
+      document.getElementById('focus-msg').className = 'msg err';
+    }
+  }
+
+  async function addFocus() {
+    const input = document.getElementById('focus-input');
+    const ticker = input.value.trim().toUpperCase();
+    const msg = document.getElementById('focus-msg');
+    if (!ticker) return;
+    try {
+      const res = await fetch('/api/research/focus', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'failed');
+      input.value = '';
+      msg.textContent = '';
+      await loadUniverse();
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = 'msg err';
+    }
+  }
+
+  async function removeTicker(ticker) {
+    try {
+      const res = await fetch(`/api/research/ticker/${encodeURIComponent(ticker)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).detail || 'failed');
+      await loadUniverse();
+    } catch (e) {
+      document.getElementById('focus-msg').textContent = e.message;
+      document.getElementById('focus-msg').className = 'msg err';
+    }
+  }
+
+  async function regenerateRecommended() {
+    const btn = document.getElementById('recommend-btn');
+    const msg = document.getElementById('recommend-msg');
+    btn.disabled = true;
+    btn.textContent = 'Scoring ~500 candidates (may take a minute)…';
+    msg.textContent = '';
+    try {
+      const res = await fetch('/api/research/recommend', { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.output || 'failed');
+      msg.textContent = `Done in ${data.duration_s}s`;
+      msg.className = 'msg ok';
+      await loadUniverse();
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = 'msg err';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '↻ Regenerate recommendations';
+    }
+  }
+
+  async function updateEstimate() {
+    const years = document.getElementById('years-select').value;
+    try {
+      const res = await fetch(`/api/research/backfill/estimate?years=${years}`);
+      const data = await res.json();
+      document.getElementById('backfill-estimate').textContent =
+        `${data.n_tickers} tickers → ~${data.estimate_hours}h at current pacing`;
+    } catch (e) { /* non-critical */ }
+  }
+
+  async function startBackfill() {
+    const years = document.getElementById('years-select').value;
+    const msg = document.getElementById('backfill-msg');
+    const btn = document.getElementById('backfill-btn');
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/research/backfill?years=${years}`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'failed to start');
+      msg.textContent = `Started — estimated ${data.estimate_hours}h. This page will keep polling status.`;
+      msg.className = 'msg ok';
+      pollBackfillStatus();
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = 'msg err';
+      btn.disabled = false;
+    }
+  }
+
+  async function pollBackfillStatus() {
+    const dot = document.getElementById('backfill-dot');
+    const text = document.getElementById('backfill-status-text');
+    const log = document.getElementById('backfill-log');
+    const btn = document.getElementById('backfill-btn');
+    try {
+      const res = await fetch('/api/research/backfill/status');
+      const data = await res.json();
+      dot.className = 'dot ' + (data.running ? 'running' : 'idle');
+      text.textContent = data.running ? 'Backfill running…' : 'Idle';
+      btn.disabled = data.running;
+      if (data.log_tail) {
+        log.style.display = 'block';
+        log.textContent = data.log_tail;
+        log.scrollTop = log.scrollHeight;
+      } else {
+        // The transient unit is removed on exit (systemd-run --collect), so a
+        // finished backfill leaves a journal that can no longer be attributed
+        // to it. Say that, rather than showing an empty box that reads as a
+        // failure.
+        log.style.display = 'block';
+        log.textContent = data.running
+          ? 'Starting…'
+          : 'No backfill output in the journal. Either none has been run since the last reboot, or the previous run’s transient unit has been collected.';
+      }
+      if (data.running) {
+        await loadUniverse(); // refresh bar counts as they grow
+      }
+    } catch (e) {
+      text.textContent = 'Status unavailable';
+    }
+  }
+
+  fetch('/api/auth/status').then(r => r.json()).then(d => {
+    if (d.authenticated) {
+      document.getElementById('analysis-nav-link').style.display = '';
+      document.getElementById('reports-nav-link').style.display = '';
+      document.getElementById('sync-nav-link').style.display = '';
+      document.getElementById('logout-nav-link').style.display = '';
+    }
+  }).catch(() => {});
+
+  async function loadIC() {
+    const body = document.getElementById('ic-body');
+    try {
+      const r = await fetch('/api/patterns/ic');
+      const d = await r.json();
+      if (d.error) { body.innerHTML = `<tr><td colspan="9" class="msg">${d.error}</td></tr>`; return; }
+      const f = (v, n) => (v == null || Number.isNaN(v)) ? '—' : Number(v).toFixed(n);
+      body.innerHTML = (d.rows || []).map(row => {
+        if (!row.n_dates) return `<tr><td>${row.variant}</td>`
+          + `<td colspan="8" class="msg">not enough names on any day yet</td></tr>`;
+        // Colour on Rank IC only, and only once the t-stat says it means
+        // something -- an unsettled row shown in green invites reading noise
+        // as a result, which is the whole failure mode this panel exists to stop.
+        // Provisional rows have an ICIR estimated from too few dates for its
+        // own standard deviation to mean anything, so they never colour and
+        // never read as settled however large their t looks.
+        const settled = !row.provisional && row.rank_ic_t != null
+          && Math.abs(row.rank_ic_t) >= d.target_t;
+        const cls = !settled ? '' : (row.rank_ic > 0 ? 'pos' : 'neg');
+        const need = row.rank_ic_dates_needed;
+        const short = need != null ? Math.max(0, need - row.n_dates) : null;
+        return `<tr>
+          <td>${row.variant}</td>
+          <td class="num">${row.n_dates}</td>
+          <td class="num">${row.median_names ?? '—'}</td>
+          <td class="num">${f(row.ic, 4)}</td>
+          <td class="num">${f(row.icir, 3)}</td>
+          <td class="num ${cls}"><strong>${f(row.rank_ic, 4)}</strong></td>
+          <td class="num ${cls}">${f(row.rank_icir, 3)}</td>
+          <td class="num">${f(row.rank_ic_t, 2)}${settled ? ''
+            : ` <span class="msg">${row.provisional ? 'prov' : 'ns'}</span>`}</td>
+          <td class="num">${need == null ? '—' : (short === 0 ? 'met' : `${need} (${short} more)`)}</td>
+        </tr>`;
+      }).join('');
+      const b = d.benchmarks || {};
+      document.getElementById('ic-scale').innerHTML =
+        `<strong>${d.total_scored_rows}</strong> scored mover-days across `
+        + `<strong>${d.sessions}</strong> sessions. Published IC for scale (AlphaSeek, arXiv `
+        + `2608.13913, CSI300): ` + Object.entries(b).map(([k, v]) =>
+            `${k} ${v.toFixed(4)}`).join(' · ')
+        + `. An IC near 0.04 is a <em>good</em> factor. "Dates needed" is how many trading days `
+        + `this row's own consistency requires to reach t=${d.target_t}. Rows marked `
+        + `<strong>prov</strong> have fewer than ${d.min_dates_for_t} dates — their ICIR is a mean `
+        + `divided by a standard deviation from the same handful of days, so it is unbounded, not `
+        + `merely noisy. Ignore their t entirely.`;
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="9" class="msg">Could not load: ${e.message}</td></tr>`;
+    }
+  }
+
+  async function loadHypotheses() {
+    const body = document.getElementById('hyp-body');
+    try {
+      const r = await fetch('/api/patterns/hypotheses');
+      const d = await r.json();
+      const runs = d.runs || [];
+      const tally = d.tally || {};
+      document.getElementById('hyp-tally').innerHTML =
+        Object.entries(tally).map(([k, v]) => `<strong>${v}</strong> ${k}`).join(' · ')
+        + (d.total_variants ? ` — <strong>${d.total_variants}</strong> variants tried across `
+                            + `<strong>${d.n_hypotheses}</strong> hypotheses`
+                            + (d.n_runs_total > d.n_hypotheses
+                               ? ` (${d.n_runs_total} runs; showing the latest verdict for each)` : '')
+                            : '');
+      if (!runs.length) {
+        body.innerHTML = '<tr><td colspan="7" class="msg">Nothing run yet.</td></tr>'; return;
+      }
+      body.innerHTML = runs.map(x => `<tr>
+        <td title="${(x.description || '').replace(/"/g, '&quot;')}">${x.name}</td>
+        <td class="num">${x.n_trades ?? '—'}</td>
+        <td class="num">${x.gross_pct == null ? '—' : (x.gross_pct > 0 ? '+' : '') + x.gross_pct.toFixed(3) + '%'}</td>
+        <td class="num ${x.net_pct > 0 ? 'pos' : 'neg'}">${x.net_pct == null ? '—' : (x.net_pct > 0 ? '+' : '') + x.net_pct.toFixed(3) + '%'}</td>
+        <td><span class="badge-v ${x.verdict}">${x.verdict}</span></td>
+        <td class="msg">${x.killed_by
+          || (x.blocked_by ? `awaiting: ${x.blocked_by}` : '—')}</td>
+        <td class="num">${x.n_variants ?? 1}</td>
+      </tr>`).join('');
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="7" class="msg">Could not load: ${e.message}</td></tr>`;
+    }
+  }
+
+  loadUniverse();
+  loadIC();
+  loadHypotheses();
+  pollBackfillStatus();
+  setInterval(pollBackfillStatus, 15 * 1000);
+</script>
+</body>
+</html>
