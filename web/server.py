@@ -1211,15 +1211,29 @@ async def run_sync(request: Request):
     body = await request.json()
     selected: List[str] = body.get("tickers", [])  # empty = all
 
-    pem = next(
-        (p for p in [
-            Path(__file__).parent.parent / "racknerd2gb.pem",
-            Path(__file__).parent.parent.parent / "racknerd2gb.pem",
-            Path.home() / ".ssh" / "racknerd2gb.pem",
-        ] if p.exists()),
-        Path(__file__).parent.parent / "racknerd2gb.pem",
-    )
-    remote = "root@23.95.245.174:/root/.tradingagents/logs/"
+    # Host and key come from the environment, never from source. The remote
+    # dropped the hardcoded IP and PEM path in July (dba8be2); this copy of
+    # the file predated that and still carried both. The key name is only
+    # reconnaissance on its own -- no key material was ever committed -- but a
+    # `root@<ip>` target in source tells an attacker exactly what to point at.
+    pem_env = os.environ.get("TRADINGAGENTS_SYNC_PEM")
+    if not pem_env:
+        raise HTTPException(
+            status_code=503,
+            detail="Sync is not configured: set TRADINGAGENTS_SYNC_PEM to the "
+                   "SSH key path and TRADINGAGENTS_SYNC_HOST to user@host.")
+    pem = Path(pem_env).expanduser()
+    if not pem.exists():
+        raise HTTPException(status_code=503,
+                            detail=f"TRADINGAGENTS_SYNC_PEM does not exist: {pem}")
+    host = os.environ.get("TRADINGAGENTS_SYNC_HOST")
+    if not host:
+        raise HTTPException(
+            status_code=503,
+            detail="Sync is not configured: set TRADINGAGENTS_SYNC_HOST to user@host.")
+    remote_path = os.environ.get("TRADINGAGENTS_SYNC_REMOTE_PATH",
+                                 "/root/.tradingagents/logs/")
+    remote = f"{host}:{remote_path}"
     local = str(LOGS_DIR) + "/"
 
     cmd = [
@@ -1258,7 +1272,7 @@ async def run_sync(request: Request):
                     "ssh",
                     "-i", str(pem),
                     "-o", "StrictHostKeyChecking=no",
-                    "root@23.95.245.174",
+                    host,
                     "curl -s -X POST http://localhost:7777/api/performance/ingest",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
