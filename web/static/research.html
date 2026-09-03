@@ -204,6 +204,56 @@
   </section>
 
   <section>
+    <h2>Open-to-High vs What the Classifier Said</h2>
+    <p class="note" style="margin-bottom:10px">
+      Each session's five biggest <strong>open-to-high</strong> runs, matched to the
+      <em>price-sensitive</em> announcement in front of them and the score it was given.
+      This hunts the classifier's unmeasured failure: a low or neutral score followed by a
+      big move up. The measured weakness is on the buy side — directionally right about
+      <strong>50%</strong> on strong Buys against <strong>65%</strong> on strong Sells — and
+      every worst call ranked so far was a high score that <em>fell</em>. Nothing looked for
+      the inverse.
+      <br><br>
+      <strong>Open-to-high is not a return.</strong> You cannot sell at the high. It asks
+      "did the market react at all", which is the question about the classifier, not
+      "was it a good trade".
+      <br><br>
+      Two errors are kept apart because their base rates differ enormously.
+      <strong>Contradicted</strong> (score ≤45) means the model leaned negative and the stock
+      jumped — only 8.3% of announcements score that low, so it is rare and it means something.
+      <strong>No call</strong> (46–54) means the model saw nothing; <strong>50 is the mode at
+      51% of all scores</strong>, so this is weak evidence on its own and common by construction.
+      Administrative filings — Appendix 3Y, notice of AGM — never raise a flag: scoring those
+      50 is correct.
+      <br><br>
+      <strong>Read the base rate before the flags.</strong> Ranking the top five and reading
+      their scores is selection on the outcome — an unremarkable score behind a big move is the
+      default, not evidence. A flag means <em>worth a look</em>. Only the accumulating record
+      can answer whether the classifier is really missing good news, and that goes through the
+      hypothesis ledger, not this panel.
+    </p>
+    <div class="card">
+      <div id="oh-tally" class="note" style="margin-bottom:10px"></div>
+      <div style="overflow-x:auto">
+        <table id="oh-table">
+          <thead><tr>
+            <th>Ticker</th>
+            <th class="num" title="(high - open) / open, on the finalized session">Open→High</th>
+            <th class="num" title="Score the classifier gave this specific announcement">Score</th>
+            <th title="Buy / Hold / Sell for that announcement">Signal</th>
+            <th title="Price-sensitive announcements only can raise a flag">Announcement</th>
+            <th class="num" title="Trading days between the announcement's tradeable session and this one">Age</th>
+            <th>Flag</th>
+          </tr></thead>
+          <tbody id="oh-body"><tr><td colspan="7" class="msg">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="note" id="oh-base" style="margin-top:12px"></p>
+      <div id="oh-flags" style="margin-top:14px"></div>
+    </div>
+  </section>
+
+  <section>
     <h2>Classifier Information Coefficient</h2>
     <p class="note" style="margin-bottom:10px">
       Each day, the scored names are ranked by AI score and ranked again by the return they
@@ -548,9 +598,66 @@
     }
   }
 
+  async function loadOpenHigh() {
+    const body = document.getElementById('oh-body');
+    try {
+      const r = await fetch('/api/patterns/openhigh-review');
+      const d = await r.json();
+      const rows = d.top || [], p = d.population, h = d.history || {};
+      document.getElementById('oh-tally').innerHTML = d.session
+        ? `Session <strong>${d.session}</strong> — `
+          + `<strong>${h.n_sessions || 0}</strong> session${h.n_sessions === 1 ? '' : 's'} recorded, `
+          + `<strong>${h.contradicted || 0}</strong> contradicted · `
+          + `<strong>${h.no_call || 0}</strong> no-call so far`
+        : 'Nothing recorded yet — the review runs 20:45 Sydney, Mon–Fri.';
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7" class="msg">Nothing recorded yet.</td></tr>';
+        return;
+      }
+      const esc = t => (t || '').replace(/[<>&"]/g, c =>
+        ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+      body.innerHTML = rows.map(x => `<tr>
+        <td><strong>${esc(x.ticker)}</strong></td>
+        <td class="num pos">+${(x.open_high_pct ?? 0).toFixed(2)}%</td>
+        <td class="num">${x.score ?? '—'}</td>
+        <td>${esc(x.signal) || '—'}</td>
+        <td title="${esc(x.reason)}">${x.headline
+            ? (x.price_sensitive ? '' : '<span class="msg">[admin] </span>') + esc(x.headline)
+            : '<span class="msg">no announcement in window</span>'}</td>
+        <td class="num">${x.news_age_days == null ? '—' : x.news_age_days + 'd'}</td>
+        <td>${x.flag_kind
+            ? `<span class="badge-v ${x.flag_kind === 'contradicted' ? 'rejected' : 'inconclusive'}">${x.flag_kind}</span>`
+            : '<span class="msg">—</span>'}</td>
+      </tr>`).join('');
+
+      document.getElementById('oh-base').innerHTML = p ? `<strong>Base rate for this session.</strong> `
+        + `${p.n_movers} movers screened, ${p.n_with_news} with news in the window, `
+        + `${p.n_price_sensitive} of those price-sensitive, ${p.n_scored} scored. `
+        + `Median open→high <strong>${(p.median_open_high ?? 0).toFixed(2)}%</strong>; `
+        + `a move is only flagged at <strong>11.0%</strong>, the 90th percentile of all screened movers. `
+        + `Mean open→high was ${p.mean_oh_low_score == null ? '—' : p.mean_oh_low_score.toFixed(2) + '%'} `
+        + `for low-scored names against ${p.mean_oh_high_score == null ? '—' : p.mean_oh_high_score.toFixed(2) + '%'} `
+        + `for the rest — <em>if the classifier were blind to good news these would diverge, and one session cannot show that.</em>`
+        : '';
+
+      const f = d.flags || [];
+      document.getElementById('oh-flags').innerHTML = f.length
+        ? `<span class="note"><strong>Flagged across all sessions (${f.length}).</strong> `
+          + `Candidates to review together once there are enough — never one at a time.</span>`
+          + '<ul class="note" style="margin:6px 0 0 18px">'
+          + f.map(x => `<li>${esc(x.session_date)} · <strong>${esc(x.ticker)}</strong> `
+              + `+${(x.open_high_pct ?? 0).toFixed(1)}% on a score of ${x.score} — `
+              + `${esc(x.headline)}</li>`).join('') + '</ul>'
+        : '<span class="note">No flags recorded yet.</span>';
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="7" class="msg">Could not load: ${e.message}</td></tr>`;
+    }
+  }
+
   loadUniverse();
   loadIC();
   loadHypotheses();
+  loadOpenHigh();
   pollBackfillStatus();
   setInterval(pollBackfillStatus, 15 * 1000);
 </script>

@@ -78,6 +78,7 @@ _LOCAL_OR_AUTH_PATHS = {
     "/api/gap-reversion/scan", "/api/gap-reversion/open-positions",
     "/api/gap-reversion/close-positions", "/api/markets/sector-map/rebuild",
     "/api/patterns/signal-outcomes/collect", "/api/costs/capture-spreads",
+    "/api/patterns/openhigh-review", "/api/patterns/tuning-lane/score",
     "/api/markets/spi200/refresh", "/api/swing/propose", "/api/swing/sync",
 }
 
@@ -590,6 +591,71 @@ async def patterns_collect_outcomes(days: int = 30):
     from tradingagents.signal_outcomes import collect
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, lambda: collect(days=days))
+
+
+@app.post("/api/patterns/openhigh-review")
+async def patterns_openhigh_review(session: str = "", top_n: int = 5,
+                                   window: int = 3, store: bool = True):
+    """Rank a session's movers by open-to-high and check the news in front of
+    them against what the classifier scored it.
+
+    Looks for the classifier's unmeasured failure: a LOW or neutral score
+    followed by a big upward move. Called by asx-openhigh-review.timer at 20:45
+    Sydney -- after the 20:15 mover-finalize run has written the true high, and
+    the ten-minute signals refresh has scored the day's announcements.
+
+    Returns the base rate for the session alongside the top N. The base rate is
+    not decoration: most scores sit at 50, so a big mover with an unremarkable
+    score is the default outcome, not evidence."""
+    from tradingagents.openhigh_review import review
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _executor, lambda: review(session=session, top_n=top_n,
+                                  window=window, store=store))
+
+
+@app.get("/api/patterns/openhigh-review")
+async def patterns_openhigh_stored(session: str = ""):
+    """What the nightly review stored, read-only. The dashboard uses this so
+    rendering never depends on a recompute that could disagree with the row the
+    timer actually wrote."""
+    from tradingagents.openhigh_review import stored
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: stored(session=session))
+
+
+@app.post("/api/patterns/tuning-lane/score")
+async def tuning_lane_score(session: str = "", limit: int = 400):
+    """Score a session under the active tuned classifier version.
+
+    Called daily by asx-tuning-lane.timer. A no-op until a tuned version is
+    minted, so the lane costs no quota until it actually diverges from
+    production."""
+    from tradingagents.tuning_lane import score_session
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _executor, lambda: score_session(session=session, limit=limit))
+
+
+@app.get("/api/patterns/tuning-lane")
+async def tuning_lane_report(horizon: str = "fwd_5d_pct"):
+    """Every registered classifier version with its OUT-OF-SAMPLE record.
+
+    In-sample rows are excluded by construction: a tuned version measured on
+    outcomes it was tuned against wins by fitting, not by skill."""
+    from tradingagents.tuning_lane import report
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: report(horizon=horizon))
+
+
+@app.get("/api/patterns/openhigh-flags")
+async def patterns_openhigh_flags(limit: int = 20):
+    """Flagged rows across sessions -- the accumulating record. One session
+    cannot show a classifier problem; this is what makes a real test possible
+    later."""
+    from tradingagents.openhigh_review import recent
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: recent(limit=limit))
 
 
 @app.get("/api/patterns/hypotheses")
