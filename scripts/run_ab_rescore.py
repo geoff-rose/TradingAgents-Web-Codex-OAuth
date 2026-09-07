@@ -55,6 +55,7 @@ def stored_vs_expected(version):
     truncated candidate pool."""
     import sqlite3
     from tradingagents import asx_signals as S
+    from datetime import date, timedelta
     from tradingagents.asx_feed import DB_PATH as ASX_DB, tradeable_session_for
     from tradingagents.prompt_ab import _connect
     with _connect() as db:
@@ -62,12 +63,22 @@ def stored_vs_expected(version):
                           (version,)).fetchone()[0]
     con = sqlite3.connect(f"file:{ASX_DB}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
+    # Mirror score_under's filter EXACTLY: membership is by tradeable session,
+    # not by released_at. Filtering on released_at >= WINDOW[0] missed 170
+    # announcements released after the close on the preceding day whose
+    # tradeable session is the window's first -- 930 against a true 1,100, so
+    # the completeness check would have blessed a run that was 15% short.
+    # Reach back several days before the window for exactly that reason.
+    lookback = (date.fromisoformat(WINDOW[0]) - timedelta(days=5)).isoformat()
     rows = [dict(r) for r in con.execute(
-        "SELECT a.fingerprint, a.headline, a.price_sensitive, a.is_halt"
-        " FROM announcements a JOIN universe u ON u.ticker = a.ticker"
-        " WHERE a.released_at >= ?", (WINDOW[0],))]
+        "SELECT a.fingerprint, a.headline, a.price_sensitive, a.is_halt,"
+        " a.released_at FROM announcements a JOIN universe u ON u.ticker = a.ticker"
+        " WHERE a.released_at >= ?", (lookback,))]
     con.close()
-    want = sum(1 for r in rows if S._worth_a_call(r))
+    want = sum(
+        1 for r in rows
+        if S._worth_a_call(r)
+        and WINDOW[0] <= (tradeable_session_for(r.get("released_at") or "") or "") <= WINDOW[1])
     return have, want
 
 
