@@ -79,7 +79,7 @@ _LOCAL_OR_AUTH_PATHS = {
     "/api/gap-reversion/close-positions", "/api/markets/sector-map/rebuild",
     "/api/patterns/signal-outcomes/collect", "/api/costs/capture-spreads",
     "/api/patterns/openhigh-review", "/api/patterns/tuning-lane/score",
-    "/api/asx/signals/health",
+    "/api/asx/signals/health", "/api/health/freshness",
     "/api/markets/spi200/refresh", "/api/swing/propose", "/api/swing/sync",
 }
 
@@ -455,6 +455,26 @@ def _classify_in_background(limit: int) -> None:
         _signals_last_result.update({"error": f"{type(exc).__name__}: {exc}"})
     finally:
         _signals_run_lock.release()
+
+
+@app.get("/api/health/freshness")
+async def health_freshness():
+    """503 when a job reported success but the table it owns did not advance.
+
+    Exit codes cannot catch this: five jobs here have returned success while
+    writing nothing. This compares each unit's last successful run against the
+    last write to the data it owns, so a hollow run is visible in
+    `systemctl --failed` within the hour.
+
+    Jobs whose output is legitimately intermittent are excluded by name, with
+    the reason, in freshness.SKIPPED -- a monitor that fires on a normal quiet
+    day gets ignored, and then it protects nothing."""
+    from tradingagents.freshness import check
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(_executor, check)
+    if not data["ok"]:
+        raise HTTPException(status_code=503, detail=data)
+    return data
 
 
 @app.get("/api/asx/signals/health")
