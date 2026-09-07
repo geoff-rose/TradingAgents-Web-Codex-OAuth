@@ -29,7 +29,12 @@ VERSIONS = ["v4-novelty", "v5-context"]
 # documented in classify_pending().
 CHUNK = 80
 CANDIDATES = 3000   # pool big enough to cover the whole window, independent of CHUNK
-PAUSE_ABOVE = 88          # % of the 5h window at which to park
+PAUSE_ABOVE = 98          # % of the 5h window at which to park
+# Held back while the ASX is open. The live classifier shares this quota and
+# used 32 calls in the hour before this was written; spending the window to the
+# last percent would stop today's real announcements being scored, and the
+# ongoing record is worth more than finishing a one-off backfill sooner.
+MARKET_RESERVE_PCT = 5
 
 
 def quota():
@@ -66,6 +71,15 @@ def stored_vs_expected(version):
     return have, want
 
 
+def ceiling() -> int:
+    """Park threshold, reduced while the ASX is trading."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Australia/Sydney"))
+    trading = now.weekday() < 5 and (10, 0) <= (now.hour, now.minute) <= (16, 30)
+    return PAUSE_ABOVE - (MARKET_RESERVE_PCT if trading else 0)
+
+
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -82,14 +96,15 @@ def main():
         done_total = 0
         while True:
             used, reset_in = quota()
-            if used >= PAUSE_ABOVE:
-                log(f"quota {used}% -- parking {reset_in//60}m for the window reset")
+            cap = ceiling()
+            if used >= cap:
+                log(f"quota {used}% (cap {cap}%) -- parking {reset_in//60}m for the reset")
                 time.sleep(reset_in + 60)
                 continue
             # Size the batch to the quota left, so a chunk cannot overshoot the
             # cap mid-flight: the driver only checks BETWEEN chunks, and at
             # ~0.05%/call a blind 400-call chunk from 82% would run past 100%.
-            room = max(1, int((PAUSE_ABOVE - used) / cost_per_call))
+            room = max(1, int((cap - used) / cost_per_call))
             res = score_under(version, WINDOW[0], WINDOW[1],
                               limit=min(CHUNK, room), candidate_limit=CANDIDATES)
             n = res.get("scored", 0)

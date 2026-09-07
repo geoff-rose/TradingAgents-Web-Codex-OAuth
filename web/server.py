@@ -614,9 +614,16 @@ async def markets_snapshot():
 
 @app.post("/api/markets/spi200/refresh")
 async def markets_spi200_refresh():
+    """503 when no quote could be obtained, so asx-spi200-refresh.service goes
+    red rather than persisting nulls. Barchart started answering with an empty
+    HTTP 202 at some point before 2026-09-07 and the dashboard row read "--"
+    for days while the timer reported success."""
     from tradingagents.markets import refresh_spi200
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, refresh_spi200)
+    data = await loop.run_in_executor(_executor, refresh_spi200)
+    if data.get("last") is None:
+        raise HTTPException(status_code=503, detail=data)
+    return data
 
 
 @app.get("/api/markets/sectors")

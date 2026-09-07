@@ -19,6 +19,24 @@ SNAPSHOT_TICKERS = [
     ("^GSPC", "S&P 500"),
     ("^IXIC", "Nasdaq"),
     ("^DJI", "Dow Jones"),
+    # US futures, added 2026-09-07 at the user's request. The cash indices
+    # above are frozen from 06:00 Sydney until the US opens at 23:30, so
+    # during the whole ASX session they say nothing about what is happening
+    # now; the futures trade nearly around the clock and are the live
+    # overnight read, the same role SPI 200 plays for the ASX.
+    #
+    # NQ=F tracks the Nasdaq **100**, while ^IXIC above is the Nasdaq
+    # **Composite** -- different indices at different levels (29,565 vs
+    # 26,507 when this was added), so they are labelled apart. Reading one
+    # against the other as a level or a basis is meaningless.
+    #
+    # Yahoo's previous_close for these is the contract's OWN prior
+    # settlement, so change_pct is the genuine overnight move. That is the
+    # distinction the SPI 200 work got wrong first time round: subtracting a
+    # cash close from a futures level mixes in a persistent basis that has
+    # nothing to do with the overnight move.
+    ("ES=F", "S&P 500 (futures)"),
+    ("NQ=F", "Nasdaq 100 (futures)"),
     ("AUDUSD=X", "AUD/USD"),
     ("AUDEUR=X", "AUD/EUR"),
     ("USDEUR=X", "USD/EUR"),
@@ -94,11 +112,77 @@ def _spi200_scrape() -> tuple[float | None, float | None]:
         return None, None
 
 
+# IBKR carries the contract Barchart was scraped for: symbol "SPI" on SNFE,
+# front month resolved by expiry (APU6 etc.). Delayed data is enough -- this is
+# read once a day before the open, and `close` is the contract's own previous
+# settlement, which is exactly the basis the "expected open" number needs.
+_SPI200_IBKR_CLIENT_ID = 93
+
+
+def _spi200_ibkr() -> tuple[float | None, float | None]:
+    """(last, change_pts) from IB Gateway, or (None, None) if unavailable."""
+    import math
+
+    from ib_async import IB, Future
+
+    def bad(v) -> bool:
+        return (v is None or not isinstance(v, (int, float))
+                or math.isnan(v) or v <= 0)
+
+    ib = IB()
+    try:
+        ib.connect("127.0.0.1", 4002, clientId=_SPI200_IBKR_CLIENT_ID, timeout=15)
+        details = ib.reqContractDetails(
+            Future(symbol="SPI", exchange="SNFE", currency="AUD"))
+        if not details:
+            return None, None
+        # front month = nearest expiry still ahead of us
+        front = sorted(details,
+                       key=lambda d: d.contract.lastTradeDateOrContractMonth)[0].contract
+        ib.reqMarketDataType(4)          # delayed-frozen; no real-time ASX subscription
+        tk = ib.reqMktData(front, "", True, False)
+        for _ in range(24):
+            ib.sleep(0.5)
+            if not bad(tk.last) and not bad(tk.close):
+                break
+        last = None if bad(tk.last) else float(tk.last)
+        prev = None if bad(tk.close) else float(tk.close)
+        change = round(last - prev, 1) if last is not None and prev is not None else None
+        return last, change
+    except Exception:
+        return None, None
+    finally:
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+
+
 def refresh_spi200() -> dict[str, Any]:
-    """Scrape Barchart now and persist the result. Called once a day by
-    asx-spi200-refresh.timer -- not on the dashboard's own poll cycle."""
-    last, change_pts = _spi200_scrape()
-    data = {"last": last, "change_pts": change_pts, "fetched_at": time.time()}
+    """Refresh the SPI 200 quote and persist it. Called once a day by
+    asx-spi200-refresh.timer -- not on the dashboard's own poll cycle.
+
+    **IBKR first, Barchart second.** Barchart began returning an empty HTTP 202
+    (bot blocking) and the scrape silently produced nulls, so the dashboard row
+    read "--" while the timer reported success -- found 2026-09-07. IB Gateway
+    is already running for the paper books and carries the same contract, so it
+    is both more reliable and one less thing to scrape. The scrape is kept as a
+    fallback in case IB Gateway is logged out.
+
+    Returns `source` and, when both fail, `error` -- so the caller can fail
+    loudly instead of persisting nulls that look like a quiet market.
+    """
+    last, change_pts = _spi200_ibkr()
+    source = "ibkr"
+    if last is None:
+        last, change_pts = _spi200_scrape()
+        source = "barchart"
+    data = {"last": last, "change_pts": change_pts, "fetched_at": time.time(),
+            "source": source if last is not None else None}
+    if last is None:
+        data["error"] = ("SPI 200 unavailable: IB Gateway returned no quote and "
+                         "the Barchart scrape returned nothing (it now answers "
+                         "with an empty HTTP 202)")
     _SPI200_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _SPI200_CACHE_PATH.write_text(json.dumps(data))
     return data
