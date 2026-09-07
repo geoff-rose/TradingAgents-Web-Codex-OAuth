@@ -39,7 +39,11 @@ AUTH_FILE = Path(os.environ.get(
 )).expanduser()
 
 BASE_URL = "https://chatgpt.com/backend-api/codex"
-DEFAULT_MODEL = os.environ.get("TRADINGAGENTS_CODEX_MODEL", "gpt-5.4")
+# gpt-5.4 was withdrawn for ChatGPT-account Codex auth on 2026-09-06 and now
+# 400s on every call, so it is not a safe fallback: any process started without
+# /etc/tradingagents/env silently used a dead model. Only gpt-5.5 and
+# gpt-5.6-sol are accepted (25 ids probed).
+DEFAULT_MODEL = os.environ.get("TRADINGAGENTS_CODEX_MODEL", "gpt-5.6-sol")
 
 # The Codex backend surfaces plan/rate limits and auth failures through
 # message text rather than distinct status codes, same situation as xAI.

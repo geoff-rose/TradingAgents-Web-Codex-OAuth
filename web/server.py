@@ -79,6 +79,7 @@ _LOCAL_OR_AUTH_PATHS = {
     "/api/gap-reversion/close-positions", "/api/markets/sector-map/rebuild",
     "/api/patterns/signal-outcomes/collect", "/api/costs/capture-spreads",
     "/api/patterns/openhigh-review", "/api/patterns/tuning-lane/score",
+    "/api/asx/signals/health",
     "/api/markets/spi200/refresh", "/api/swing/propose", "/api/swing/sync",
 }
 
@@ -454,6 +455,51 @@ def _classify_in_background(limit: int) -> None:
         _signals_last_result.update({"error": f"{type(exc).__name__}: {exc}"})
     finally:
         _signals_run_lock.release()
+
+
+@app.get("/api/asx/signals/health")
+async def asx_signals_health(hours: int = 6, min_attempts: int = 20):
+    """503 when the classifier has been attempting calls and none succeed.
+
+    The refresh endpoint is fire-and-forget, so a provider outage returns HTTP
+    200 with an empty result and the timer reports success -- which is how
+    gpt-5.4 being cut off for ChatGPT-account Codex auth ran for a full trading
+    day unnoticed (2026-09-06, 778 calls, zero successes). This is the third
+    failure of that shape here, after asx-swing-sync's {"checked":0} during an
+    IBKR logout and the spread capture storing NaN rows.
+
+    A non-200 makes `asx-signals-health.service` go red, so the outage shows up
+    in `systemctl --failed` instead of needing someone to notice missing scores.
+    """
+    import sqlite3 as _sq
+    from datetime import datetime, timedelta, timezone
+    from tradingagents.asx_signals import DB_PATH
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)
+             ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with _sq.connect(f"file:{DB_PATH}?mode=ro", uri=True) as c:
+        row = c.execute("SELECT COUNT(*), COALESCE(SUM(ok),0), MAX(error)"
+                        " FROM llm_calls WHERE called_at >= ?", (since,)).fetchone()
+    attempts, ok, last_err = row[0], row[1], row[2]
+    body = {"window_hours": hours, "attempts": attempts, "succeeded": ok,
+            "last_error": (last_err or "")[:300]}
+
+    # Record quota alongside liveness. Until 2026-09-07 nothing here knew what
+    # the subscription limits even were, so "will this batch fit" was guesswork
+    # -- and the guess was 42% low. One cheap call an hour (~1.7% of a day's
+    # allowance) buys a usage history and an early warning. Never fatal on its
+    # own: a deliberate batch run legitimately drives usage high, and a unit
+    # that goes red during normal work stops being read.
+    try:
+        from tradingagents.quota import snapshot
+        body["quota"] = snapshot()
+    except Exception as exc:                     # never let telemetry break the check
+        body["quota"] = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+    if attempts >= min_attempts and ok == 0:
+        raise HTTPException(status_code=503, detail={
+            "error": f"classifier has made {attempts} calls in {hours}h with ZERO "
+                     f"successes -- the provider is refusing every request",
+            **body})
+    return {"ok": True, **body}
 
 
 @app.post("/api/asx/signals/refresh")

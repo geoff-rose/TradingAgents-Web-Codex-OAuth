@@ -65,11 +65,19 @@ def _connect() -> sqlite3.Connection:
 
 
 def score_under(version: str, session_from: str, session_to: str | None = None,
-                limit: int = 400) -> dict[str, Any]:
+                limit: int = 400, candidate_limit: int | None = None) -> dict[str, Any]:
     """Score every in-universe announcement in the window under `version`.
 
     Writes only to `ab_scores`. Production `signals`/`ticker_signals` are
     never touched, so a comparison run cannot disturb the live record.
+
+    **`candidate_limit` decouples the candidate pool from the batch size.**
+    They used to be one number (`limit * 6`), which coupled two unrelated
+    things: how far back the scan reaches, and how much work commits at once.
+    Running with limit=100 therefore searched only the newest 600 announcements
+    and silently skipped the first two days of an eight-day window -- it scored
+    101 of 910 and reported success (2026-09-07). Pass a large
+    `candidate_limit` to cover the window and a small `limit` to commit often.
     """
     from . import asx_signals as S
     from .asx_feed import DB_PATH as ASX_DB, tradeable_session_for
@@ -83,7 +91,8 @@ def score_under(version: str, session_from: str, session_to: str | None = None,
             "SELECT a.fingerprint, a.ticker, COALESCE(a.company, u.company) AS company,"
             " a.headline, a.released_at, a.is_halt, a.halt_kind, a.price_sensitive, a.url"
             " FROM announcements a JOIN universe u ON u.ticker = a.ticker"
-            " ORDER BY COALESCE(a.released_at, a.seen_at) DESC LIMIT ?", (limit * 6,))]
+            " ORDER BY COALESCE(a.released_at, a.seen_at) DESC LIMIT ?",
+            (candidate_limit if candidate_limit is not None else limit * 6,))]
     finally:
         conn.close()
 
@@ -94,55 +103,78 @@ def score_under(version: str, session_from: str, session_to: str | None = None,
             continue
         if S._worth_a_call(r):
             todo.append(r)
-    todo = todo[:limit]
-
+    # Drop already-scored rows BEFORE applying the limit. The other order
+    # spends the batch allowance on rows that are then discarded, so each pass
+    # does less work as the done-set grows and the run stalls short of the
+    # window -- the same shrinking-window trap as the candidate pool above.
     with _connect() as db:
         done = {x[0] for x in db.execute(
             "SELECT fingerprint FROM ab_scores WHERE version=?", (version,))}
-    todo = [r for r in todo if r["fingerprint"] not in done]
+    todo = [r for r in todo if r["fingerprint"] not in done][:limit]
     if not todo:
         return {"version": version, "scored": 0, "reason": "nothing new in window"}
 
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     scored, failed = 0, 0
-    with _connect() as db:
-        for r in todo:
-            body = ""
-            try:
-                from .announcement_body import fetch_body
-                body = fetch_body(r["fingerprint"], r["url"]) if r.get("url") else ""
-            except Exception:
-                pass
-            prompt = (f"Ticker: {r['ticker']}\nCompany: {r.get('company') or 'unknown'}\n"
-                      f"Headline: {r['headline']}\n"
-                      f"Halt: {'yes' if r.get('is_halt') else 'no'}\n"
-                      f"Flagged price-sensitive by ASX: "
-                      f"{'yes' if r.get('price_sensitive') else 'no'}")
-            if body:
-                prompt += f"\n\nAnnouncement body:\n{body[:20000]}"
-            if version in USES_CONTEXT:
-                try:
-                    ctx = build_context(r["ticker"], r.get("released_at"))
-                    if ctx:
-                        prompt += "\n\n" + ctx
-                except Exception:
-                    pass
-            try:
-                txt = S._ask_counted(prompt, system=system, kind=f"ab-{version}",
-                                     ticker=r["ticker"])
-                parsed = S._extract_json(txt) or {}
-                sc = int(parsed["score"])
-            except Exception:
-                failed += 1
-                continue
-            db.execute(
+    pending: list[tuple] = []
+
+    def flush():
+        """Write in short bursts rather than holding one transaction open.
+
+        The connection used to stay open across the whole batch, so the write
+        lock was held for as long as the LLM calls took -- about 25 minutes for
+        a 400-row batch. swing.db is shared with the scanner, mover_log and the
+        paper books, and on 2026-09-07 that starved asx-scanner-refresh during
+        ASX trading hours: it returned HTTP 200 and silently wrote nothing.
+        Flushing every FLUSH_EVERY rows keeps the lock held for milliseconds.
+        """
+        if not pending:
+            return
+        with _connect() as db:
+            db.executemany(
                 "INSERT OR REPLACE INTO ab_scores"
                 " (fingerprint, version, ticker, score, reason, model, scored_at)"
-                " VALUES (?,?,?,?,?,?,?)",
-                (r["fingerprint"], version, r["ticker"], sc,
-                 str(parsed.get("reason") or "")[:200], S._MODEL_LABEL, now))
-            scored += 1
-        db.commit()
+                " VALUES (?,?,?,?,?,?,?)", pending)
+            db.commit()
+        pending.clear()
+
+    FLUSH_EVERY = 20
+    for r in todo:
+        body = ""
+        try:
+            from .announcement_body import fetch_body
+            body = fetch_body(r["fingerprint"], r["url"]) if r.get("url") else ""
+        except Exception:
+            pass
+        prompt = (f"Ticker: {r['ticker']}\nCompany: {r.get('company') or 'unknown'}\n"
+                  f"Headline: {r['headline']}\n"
+                  f"Halt: {'yes' if r.get('is_halt') else 'no'}\n"
+                  f"Flagged price-sensitive by ASX: "
+                  f"{'yes' if r.get('price_sensitive') else 'no'}")
+        if body:
+            prompt += f"\n\nAnnouncement body:\n{body[:20000]}"
+        if version in USES_CONTEXT:
+            try:
+                ctx = build_context(r["ticker"], r.get("released_at"))
+                if ctx:
+                    prompt += "\n\n" + ctx
+            except Exception:
+                pass
+        try:
+            txt = S._ask_counted(prompt, system=system, kind=f"ab-{version}",
+                                 ticker=r["ticker"])
+            parsed = S._extract_json(txt) or {}
+            sc = int(parsed["score"])
+        except Exception:
+            failed += 1
+            continue
+        pending.append((r["fingerprint"], version, r["ticker"], sc,
+                        str(parsed.get("reason") or "")[:200],
+                        S._MODEL_LABEL, now))
+        scored += 1
+        if len(pending) >= FLUSH_EVERY:
+            flush()
+    flush()
     return {"version": version, "scored": scored, "failed": failed,
             "considered": len(todo)}
 
