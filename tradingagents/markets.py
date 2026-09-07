@@ -426,6 +426,14 @@ def get_snapshot() -> dict[str, Any]:
             if not fut_fresh else None),
     }
 
+    # Open/closed light per row. Computed from published exchange hours rather
+    # than read from a provider: Yahoo's marketState said CLOSED for ES=F
+    # mid-Globex, and it would cost one HTTP request per ticker besides.
+    from .market_hours import is_open
+    for entry in items:
+        if entry.get("group") in ("futures", "international"):
+            entry["is_open"] = is_open(entry["symbol"])
+
     data = {"items": items, "futures_status": futures_status,
             "fetched_at": time.time()}
     _snapshot_cache["ts"] = now

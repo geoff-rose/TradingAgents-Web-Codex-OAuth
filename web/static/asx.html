@@ -124,6 +124,15 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
   .dot.ok { background: var(--buy); }
   .dot.bad { background: var(--sell); }
+/* Open/closed light on futures and international rows. Colour alone does not
+   carry the meaning -- each dot has a title attribute, and "closed" is a
+   hollow ring rather than only a different hue, so it stays readable to
+   anyone who cannot separate red from green. */
+.mkt-dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+           margin-right:6px; vertical-align:middle; }
+.mkt-dot.open { background:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.18); }
+.mkt-dot.shut { background:transparent; border:2px solid #9ca3af;
+                width:6px; height:6px; }
 </style>
 </head>
 <body>
@@ -284,15 +293,20 @@
       const data = await res.json();
       const wrap = document.getElementById('tiles');
       const futWrap = document.getElementById('futures-tiles');
+      // Open/closed light. Grey when the schedule is unknown -- an unknown
+      // state must not be dressed up as either colour.
+      const dot = i => i.is_open === undefined || i.is_open === null ? ''
+        : `<span class="mkt-dot ${i.is_open ? 'open' : 'shut'}" title="${
+             i.is_open ? 'Market open' : 'Market closed'}"></span>`;
       const tile = item => {
         if (item.last == null) {
-          return `<div class="tile"><div class="label">${item.label}</div><div class="value neu">—</div></div>`;
+          return `<div class="tile"><div class="label">${dot(item)}${item.label}</div><div class="value neu">—</div></div>`;
         }
         if (item.is_point_diff) {
           const cls = item.last > 0 ? 'pos' : item.last < 0 ? 'neg' : 'neu';
           const sign = item.last > 0 ? '+' : '';
           return `<div class="tile">
-            <div class="label">${item.label}</div>
+            <div class="label">${dot(item)}${item.label}</div>
             <div class="value ${cls}">${sign}${item.last.toFixed(0)} pts</div>
           </div>`;
         }
@@ -302,7 +316,7 @@
         const unit = item.symbol === '^TNX' ? '%' : '';
         const value = item.last.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
         return `<div class="tile">
-          <div class="label">${item.label}</div>
+          <div class="label">${dot(item)}${item.label}</div>
           <div class="value">${value}${unit}</div>
           <div class="change ${cls}">${sign}${item.change_pct.toFixed(2)}%</div>
         </div>`;
