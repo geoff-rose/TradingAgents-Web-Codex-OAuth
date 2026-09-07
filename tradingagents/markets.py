@@ -44,7 +44,24 @@ SNAPSHOT_TICKERS = [
     ("GC=F", "Gold"),
     ("CL=F", "Crude Oil (WTI)"),
     ("^TNX", "US 10Y Yield"),
+    # Asian markets, added 2026-09-07. These trade DURING the ASX session --
+    # Tokyo, Seoul, Hong Kong, Shanghai and Singapore all overlap Sydney hours
+    # -- so unlike the US cash indices they are live while you are watching,
+    # which is why they get their own section rather than sitting among rows
+    # that are frozen until New York opens.
+    #
+    # China is 000001.SS, not ^SSEC: ^SSEC 404s on Yahoo (checked 2026-09-07,
+    # "possibly delisted"). Labelled country-first because the section is about
+    # places, and the index name is the detail.
+    ("^STI", "Singapore (STI)"),
+    ("^HSI", "Hong Kong (Hang Seng)"),
+    ("^N225", "Japan (Nikkei 225)"),
+    ("^KS11", "South Korea (KOSPI)"),
+    ("000001.SS", "China (Shanghai Composite)"),
 ]
+
+# Rendered as their own dashboard section, below Futures.
+INTERNATIONAL_SYMBOLS = {"^STI", "^HSI", "^N225", "^KS11", "000001.SS"}
 
 # SPI 200 futures has no free Yahoo Finance ticker (every guessed symbol
 # 404s, Yahoo's search doesn't index it either -- confirmed 2026-08-21).
@@ -326,7 +343,9 @@ def get_snapshot() -> dict[str, Any]:
     for sym, label in SNAPSHOT_TICKERS:
         entry = {"symbol": sym, "label": label, "last": None,
                  "previous_close": None, "change_pct": None,
-                 "group": "futures" if sym in FUTURES_SYMBOLS else "markets"}
+                 "group": ("futures" if sym in FUTURES_SYMBOLS
+                           else "international" if sym in INTERNATIONAL_SYMBOLS
+                           else "markets")}
         try:
             info = tickers.tickers[sym].fast_info
             last, prev = info.last_price, info.previous_close

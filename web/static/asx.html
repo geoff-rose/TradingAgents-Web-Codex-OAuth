@@ -175,6 +175,18 @@
   </section>
 
   <section>
+    <h2>International</h2>
+    <p class="note muted" style="margin:-4px 0 10px;font-size:13px">
+      Asian markets, which trade <em>during</em> the ASX session rather than after it —
+      Tokyo, Seoul, Hong Kong, Shanghai and Singapore all overlap Sydney hours, so these
+      move while you are watching.
+    </p>
+    <div class="tiles" id="intl-tiles">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+  <section>
     <h2>Sectors <span id="sector-asof" class="muted" style="font-size:13px;font-weight:400"></span></h2>
     <div class="tiles" id="sectors">
       <div class="loading">Loading…</div>
@@ -301,8 +313,14 @@
       // field would otherwise not know which "S&P 500" it had.
       const strip = i => ({ ...i, label: i.label.replace(/\s*\(futures\)$/, '')
                                                .replace(/^Expected Open.*$/, 'Expected Open') });
-      const cash = data.items.filter(i => !isFut(i));
+      const isIntl = i => i.group === 'international';
+      const cash = data.items.filter(i => !isFut(i) && !isIntl(i));
       const fut = data.items.filter(isFut).map(strip);
+      const intl = data.items.filter(isIntl);
+      const intlWrap = document.getElementById('intl-tiles');
+      intlWrap.innerHTML = intl.length
+        ? intl.map(tile).join('')
+        : '<div class="loading">No international data.</div>';
       wrap.innerHTML = cash.map(tile).join('');
       futWrap.innerHTML = fut.length
         ? fut.map(tile).join('')
@@ -331,6 +349,7 @@
       const msg = `<div class="error">Failed to load market snapshot: ${e.message}</div>`;
       document.getElementById('tiles').innerHTML = msg;
       document.getElementById('futures-tiles').innerHTML = msg;
+      document.getElementById('intl-tiles').innerHTML = msg;
     }
   }
 
