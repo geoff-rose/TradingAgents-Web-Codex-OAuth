@@ -165,6 +165,108 @@ def _spi200_ibkr() -> tuple[float | None, float | None]:
             pass
 
 
+# ---------------------------------------------------------------------------
+# Futures via IB Gateway
+# ---------------------------------------------------------------------------
+# Yahoo is not usable for these. Measured 2026-09-07 05:23Z, mid-Globex
+# session: Yahoo reported ES=F at 7722 with marketState CLOSED, which is
+# exactly IBKR's PREVIOUS SETTLEMENT -- it was not tracking the overnight
+# session at all, while IBKR delayed showed 7712 against investing.com's live
+# 7707.50. Yahoo also stamps these `exchangeDataDelayedBy: 10`, and the
+# snapshot cache and browser poll add five minutes each, so the panel could be
+# twenty minutes behind and wrong about the session on top.
+#
+# Fetched by a timer into a cache file rather than inline: a gateway connect
+# plus three quotes takes ~7s, which would be added to every dashboard load,
+# and refreshing per request would mean ~288 gateway connections a day.
+FUTURES_CONTRACTS = [
+    # (symbol, exchange, currency, snapshot symbol it replaces)
+    ("ES", "CME", "USD", "ES=F"),
+    ("NQ", "CME", "USD", "NQ=F"),
+    ("SPI", "SNFE", "AUD", "AP*0"),
+]
+_FUTURES_CACHE_PATH = Path("/opt/tradingagents/data/futures_cache.json")
+# Older than this and the panel says so rather than showing a stale number as
+# if it were current. The refresh timer runs every 2 minutes.
+_FUTURES_STALE_SECONDS = 600
+_FUTURES_IBKR_CLIENT_ID = 88
+
+
+def refresh_futures() -> dict[str, Any]:
+    """Fetch every futures contract in ONE gateway session and persist them.
+
+    Returns `error` when the gateway is unreachable or returns nothing, so the
+    caller can fail loudly and the dashboard can tell the user rather than
+    quietly showing yesterday's number.
+    """
+    import math
+
+    from ib_async import IB, Future
+
+    def bad(v) -> bool:
+        return (v is None or not isinstance(v, (int, float))
+                or math.isnan(v) or v <= 0)
+
+    out: dict[str, Any] = {}
+    err: str | None = None
+    ib = IB()
+    try:
+        ib.connect("127.0.0.1", 4002, clientId=_FUTURES_IBKR_CLIENT_ID, timeout=15)
+        ib.reqMarketDataType(4)          # delayed; no market-data subscription
+        for sym, exch, ccy, snap_sym in FUTURES_CONTRACTS:
+            try:
+                details = ib.reqContractDetails(
+                    Future(symbol=sym, exchange=exch, currency=ccy))
+                if not details:
+                    continue
+                front = sorted(
+                    details,
+                    key=lambda d: d.contract.lastTradeDateOrContractMonth)[0].contract
+                tk = ib.reqMktData(front, "", True, False)
+                for _ in range(20):
+                    ib.sleep(0.5)
+                    if not bad(tk.last) and not bad(tk.close):
+                        break
+                last = None if bad(tk.last) else float(tk.last)
+                prev = None if bad(tk.close) else float(tk.close)
+                ib.cancelMktData(front)
+                if last is None:
+                    continue
+                out[snap_sym] = {
+                    "last": last, "previous_close": prev,
+                    "change_pct": ((last - prev) / prev * 100
+                                   if prev else None),
+                    "change_pts": round(last - prev, 1) if prev else None,
+                    "contract": front.localSymbol,
+                }
+            except Exception as exc:
+                err = f"{sym}: {type(exc).__name__}"
+    except Exception as exc:
+        err = (f"IB Gateway unreachable on 127.0.0.1:4002 ({type(exc).__name__}). "
+               f"A running process is not enough -- check for LOGGED_OUT in "
+               f"`journalctl -u ibgateway`.")
+    finally:
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+
+    data = {"items": out, "fetched_at": time.time(),
+            "error": err if not out else (err or None)}
+    _FUTURES_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _FUTURES_CACHE_PATH.write_text(json.dumps(data))
+    return data
+
+
+def _futures_cached() -> dict[str, Any]:
+    try:
+        return json.loads(_FUTURES_CACHE_PATH.read_text())
+    except Exception:
+        return {"items": {}, "fetched_at": 0.0,
+                "error": "no futures cache yet -- asx-futures-refresh.timer "
+                         "has not produced one"}
+
+
 def refresh_spi200() -> dict[str, Any]:
     """Refresh the SPI 200 quote and persist it. Called once a day by
     asx-spi200-refresh.timer -- not on the dashboard's own poll cycle.
@@ -237,12 +339,34 @@ def get_snapshot() -> dict[str, Any]:
             pass
         items.append(entry)
 
+    # Override the Yahoo rows with IBKR where the cache is fresh. Yahoo stays
+    # as the fallback so the panel degrades to a stale-but-labelled number
+    # rather than to nothing.
+    fut = _futures_cached()
+    fut_age = time.time() - (fut.get("fetched_at") or 0)
+    fut_fresh = bool(fut.get("items")) and fut_age < _FUTURES_STALE_SECONDS
+    if fut_fresh:
+        for entry in items:
+            hit = fut["items"].get(entry["symbol"])
+            if hit:
+                entry.update({k: hit[k] for k in
+                              ("last", "previous_close", "change_pct")})
+                entry["source"] = "ibkr"
+                entry["contract"] = hit.get("contract")
+    else:
+        for entry in items:
+            if entry.get("group") == "futures":
+                entry["source"] = "yahoo-fallback"
+
+    spi_hit = fut["items"].get("AP*0") if fut_fresh else None
     spi_cached = _spi200_cached()
-    spi_last = spi_cached["last"]
+    spi_last = spi_hit["last"] if spi_hit else spi_cached["last"]
     spi_vs_xjo_pts = (spi_last - axjo_prev
                       if spi_last is not None and axjo_prev else None)
     items.append({
         "group": "futures",
+        "source": "ibkr" if spi_hit else "cache",
+        "contract": (spi_hit or {}).get("contract"),
         "symbol": "AP*0", "label": "SPI 200 (futures)",
         "last": spi_last, "previous_close": axjo_prev,
         "change_pct": (spi_vs_xjo_pts / axjo_prev * 100
@@ -263,11 +387,28 @@ def get_snapshot() -> dict[str, Any]:
     items.append({
         "group": "futures",
         "symbol": "AP*0-CHG", "label": "Expected Open (SPI overnight move)",
-        "last": spi_cached.get("change_pts"), "previous_close": None,
+        "last": (spi_hit or spi_cached).get("change_pts"), "previous_close": None,
         "change_pct": None, "is_point_diff": True,
+        "source": "ibkr" if spi_hit else "cache",
     })
 
-    data = {"items": items, "fetched_at": time.time()}
+    # Surfaced on the dashboard. A futures panel that silently shows a stale
+    # number is worse than one that says it is stale: the whole point of these
+    # rows is what is happening NOW.
+    futures_status = {
+        "ok": fut_fresh and not fut.get("error"),
+        "source": "ibkr" if fut_fresh else "yahoo-fallback",
+        "age_seconds": int(fut_age) if fut.get("fetched_at") else None,
+        "stale_after_seconds": _FUTURES_STALE_SECONDS,
+        "error": fut.get("error") or (
+            f"IBKR futures cache is {int(fut_age // 60)} min old "
+            f"(stale after {_FUTURES_STALE_SECONDS // 60} min) -- showing "
+            f"delayed Yahoo values, which do not track the overnight session"
+            if not fut_fresh else None),
+    }
+
+    data = {"items": items, "futures_status": futures_status,
+            "fetched_at": time.time()}
     _snapshot_cache["ts"] = now
     _snapshot_cache["data"] = data
     return data

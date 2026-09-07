@@ -80,7 +80,7 @@ _LOCAL_OR_AUTH_PATHS = {
     "/api/patterns/signal-outcomes/collect", "/api/costs/capture-spreads",
     "/api/patterns/openhigh-review", "/api/patterns/tuning-lane/score",
     "/api/asx/signals/health", "/api/health/freshness",
-    "/api/markets/spi200/refresh", "/api/swing/propose", "/api/swing/sync",
+    "/api/markets/spi200/refresh", "/api/markets/futures/refresh", "/api/swing/propose", "/api/swing/sync",
 }
 
 
@@ -630,6 +630,21 @@ async def markets_snapshot():
     from tradingagents.markets import get_snapshot
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, get_snapshot)
+
+
+@app.post("/api/markets/futures/refresh")
+async def markets_futures_refresh():
+    """Refresh ES/NQ/SPI from IB Gateway into the futures cache.
+
+    503 when nothing came back, so asx-futures-refresh.service goes red and the
+    dashboard's own status line tells the user the panel has fallen back to
+    delayed Yahoo values."""
+    from tradingagents.markets import refresh_futures
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(_executor, refresh_futures)
+    if not data.get("items"):
+        raise HTTPException(status_code=503, detail=data)
+    return data
 
 
 @app.post("/api/markets/spi200/refresh")

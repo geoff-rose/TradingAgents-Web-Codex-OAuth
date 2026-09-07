@@ -168,6 +168,7 @@
       contract's <strong>own previous settlement</strong>, never a cash close — the two sit at
       different levels and mixing them reports a basis, not an overnight move.
     </p>
+    <div id="futures-status"></div>
     <div class="tiles" id="futures-tiles">
       <div class="loading">Loading…</div>
     </div>
@@ -306,6 +307,26 @@
       futWrap.innerHTML = fut.length
         ? fut.map(tile).join('')
         : '<div class="loading">No futures data.</div>';
+
+      // Say so when the panel is degraded. These rows exist to show what is
+      // happening NOW, so a stale number presented as current is worse than an
+      // obvious warning: Yahoo reports the previous settlement during the
+      // overnight session, which reads as a real quote and is not one.
+      const st = data.futures_status || {};
+      const sBox = document.getElementById('futures-status');
+      if (st.ok) {
+        const age = st.age_seconds == null ? '' :
+          ` · updated ${st.age_seconds < 90 ? 'just now' : Math.round(st.age_seconds / 60) + ' min ago'}`;
+        sBox.innerHTML = `<div class="note muted" style="margin:-4px 0 10px;font-size:12px">`
+          + `Live from IB Gateway (delayed quote)${age}.</div>`;
+      } else {
+        sBox.innerHTML = `<div class="error" style="margin:-4px 0 10px">`
+          + `<strong>Futures data is degraded.</strong> `
+          + `${st.error ? String(st.error).replace(/[<>]/g, '') : 'IB Gateway returned nothing.'}`
+          + `<br><span style="font-size:12px">Prices below are delayed Yahoo values and may show the `
+          + `previous settlement rather than the live overnight move. Check `
+          + `<code>systemctl status ibgateway asx-futures-refresh</code>.</span></div>`;
+      }
     } catch (e) {
       const msg = `<div class="error">Failed to load market snapshot: ${e.message}</div>`;
       document.getElementById('tiles').innerHTML = msg;
