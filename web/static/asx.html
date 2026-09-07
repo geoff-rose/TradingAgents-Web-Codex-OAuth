@@ -160,6 +160,20 @@
   </section>
 
   <section>
+    <h2>Futures</h2>
+    <p class="note" style="margin:-4px 0 10px;font-size:13px" class="muted">
+      What is moving <em>now</em>. The cash indices above are frozen from 06:00 Sydney
+      until the US opens at 23:30, so through the whole ASX session they say nothing about
+      the present; these trade nearly around the clock. Each change is measured against the
+      contract's <strong>own previous settlement</strong>, never a cash close — the two sit at
+      different levels and mixing them reports a basis, not an overnight move.
+    </p>
+    <div class="tiles" id="futures-tiles">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+  <section>
     <h2>Sectors <span id="sector-asof" class="muted" style="font-size:13px;font-weight:400"></span></h2>
     <div class="tiles" id="sectors">
       <div class="loading">Loading…</div>
@@ -256,7 +270,8 @@
       const res = await fetch('/api/markets/snapshot');
       const data = await res.json();
       const wrap = document.getElementById('tiles');
-      wrap.innerHTML = data.items.map(item => {
+      const futWrap = document.getElementById('futures-tiles');
+      const tile = item => {
         if (item.last == null) {
           return `<div class="tile"><div class="label">${item.label}</div><div class="value neu">—</div></div>`;
         }
@@ -278,9 +293,23 @@
           <div class="value">${value}${unit}</div>
           <div class="change ${cls}">${sign}${item.change_pct.toFixed(2)}%</div>
         </div>`;
-      }).join('');
+      };
+      const isFut = i => i.group === 'futures';
+      // The section heading already says "futures", so drop the suffix the API
+      // carries. The API keeps it: a consumer reading labels without the group
+      // field would otherwise not know which "S&P 500" it had.
+      const strip = i => ({ ...i, label: i.label.replace(/\s*\(futures\)$/, '')
+                                               .replace(/^Expected Open.*$/, 'Expected Open') });
+      const cash = data.items.filter(i => !isFut(i));
+      const fut = data.items.filter(isFut).map(strip);
+      wrap.innerHTML = cash.map(tile).join('');
+      futWrap.innerHTML = fut.length
+        ? fut.map(tile).join('')
+        : '<div class="loading">No futures data.</div>';
     } catch (e) {
-      document.getElementById('tiles').innerHTML = `<div class="error">Failed to load market snapshot: ${e.message}</div>`;
+      const msg = `<div class="error">Failed to load market snapshot: ${e.message}</div>`;
+      document.getElementById('tiles').innerHTML = msg;
+      document.getElementById('futures-tiles').innerHTML = msg;
     }
   }
 

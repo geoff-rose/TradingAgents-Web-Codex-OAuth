@@ -77,6 +77,13 @@ _SPI200_CHANGE_RE = re.compile(r'"priceChange"\s*:\s*"([+-]?[\d,.]+)"')
 _SPI200_CACHE_PATH = Path("/opt/tradingagents/data/spi200_cache.json")
 _SPI200_STALE_SECONDS = 20 * 3600  # if the daily timer hasn't fired in 20h, self-heal with a live scrape
 
+# Which snapshot rows are futures. The dashboard renders these as their own
+# section: they answer a different question from the cash rows -- what is
+# happening right now, while Sydney trades and the underlying markets are shut
+# -- so mixing them into one grid invited reading a futures level against a
+# cash level, which means nothing.
+FUTURES_SYMBOLS = {"ES=F", "NQ=F", "AP*0", "AP*0-CHG"}
+
 _SNAPSHOT_TTL = 300  # 5 minutes
 _snapshot_cache: dict[str, Any] = {"ts": 0.0, "data": None}
 
@@ -216,7 +223,8 @@ def get_snapshot() -> dict[str, Any]:
     axjo_prev = None
     for sym, label in SNAPSHOT_TICKERS:
         entry = {"symbol": sym, "label": label, "last": None,
-                 "previous_close": None, "change_pct": None}
+                 "previous_close": None, "change_pct": None,
+                 "group": "futures" if sym in FUTURES_SYMBOLS else "markets"}
         try:
             info = tickers.tickers[sym].fast_info
             last, prev = info.last_price, info.previous_close
@@ -234,6 +242,7 @@ def get_snapshot() -> dict[str, Any]:
     spi_vs_xjo_pts = (spi_last - axjo_prev
                       if spi_last is not None and axjo_prev else None)
     items.append({
+        "group": "futures",
         "symbol": "AP*0", "label": "SPI 200 (futures)",
         "last": spi_last, "previous_close": axjo_prev,
         "change_pct": (spi_vs_xjo_pts / axjo_prev * 100
@@ -252,6 +261,7 @@ def get_snapshot() -> dict[str, Any]:
     # futures quote under any AP+year+month-code convention (only one frozen
     # expired 2017 contract), so Barchart stays the only source either way.
     items.append({
+        "group": "futures",
         "symbol": "AP*0-CHG", "label": "Expected Open (SPI overnight move)",
         "last": spi_cached.get("change_pts"), "previous_close": None,
         "change_pct": None, "is_point_diff": True,
