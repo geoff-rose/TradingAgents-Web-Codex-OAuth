@@ -5,9 +5,12 @@ this needs fetching more than once every few minutes.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +44,16 @@ SNAPSHOT_TICKERS = [
     ("AUDEUR=X", "AUD/EUR"),
     ("USDEUR=X", "USD/EUR"),
     ("BTC-USD", "Bitcoin"),
+    ("^VIX", "VIX"),
     ("GC=F", "Gold"),
+    ("SI=F", "Silver"),
+    ("HG=F", "Copper"),
     ("CL=F", "Crude Oil (WTI)"),
+    ("BZ=F", "Brent Crude"),
+    # Yahoo's continuous iron-ore contract is intermittent; the ranker uses
+    # it only when both last and previous-close are valid and otherwise falls
+    # back to the local Resources/Materials sector board.
+    ("TIO=F", "Iron Ore"),
     ("^TNX", "US 10Y Yield"),
     # Asian markets, added 2026-09-07. These trade DURING the ASX session --
     # Tokyo, Seoul, Hong Kong, Shanghai and Singapore all overlap Sydney hours
@@ -60,8 +71,13 @@ SNAPSHOT_TICKERS = [
     ("000001.SS", "China (Shanghai Composite)"),
 ]
 
-# Rendered as their own dashboard section, below Futures.
-INTERNATIONAL_SYMBOLS = {"^STI", "^HSI", "^N225", "^KS11", "000001.SS"}
+# Rendered as their own dashboard section, below Futures. This includes the
+# cash indices as well as the Asian boards: they are exchange-session gauges,
+# and each gets an explicit open/closed indicator in the UI.
+INTERNATIONAL_SYMBOLS = {
+    "^AXJO", "^GSPC", "^IXIC", "^DJI",
+    "^STI", "^HSI", "^N225", "^KS11", "000001.SS",
+}
 
 # SPI 200 futures has no free Yahoo Finance ticker (every guessed symbol
 # 404s, Yahoo's search doesn't index it either -- confirmed 2026-08-21).
@@ -103,6 +119,21 @@ FUTURES_SYMBOLS = {"ES=F", "NQ=F", "AP*0", "AP*0-CHG"}
 
 _SNAPSHOT_TTL = 300  # 5 minutes
 _snapshot_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+_RBA_F2_URL = "https://www.rba.gov.au/statistics/tables/csv/f2-data.csv"
+_RBA_AU10Y_TTL = 6 * 3600  # RBA publishes this daily, not intraday
+_rba_au10y_cache: dict[str, Any] = {"ts": 0.0, "item": None}
+_ECB_EU10Y_URL = (
+    "https://data-api.ecb.europa.eu/service/data/YC/"
+    "B.U2.EUR.4F.G_N_C.SV_C_YM.SR_10Y"
+)
+_BOE_UK10Y_URL = "https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp"
+_OFFICIAL_YIELD_TTL = 6 * 3600
+_ecb_eu10y_cache: dict[str, Any] = {"ts": 0.0, "item": None}
+_boe_uk10y_cache: dict[str, Any] = {"ts": 0.0, "item": None}
+_TRADINGVIEW_SCANNER_URL = "https://scanner.tradingview.com/global/scan"
+_TRADINGVIEW_UK10Y_TTL = 300
+_tradingview_uk10y_cache: dict[str, Any] = {"ts": 0.0, "item": None}
+_tradingview_au10y_cache: dict[str, Any] = {"ts": 0.0, "item": None}
 
 # FRED's daily-Treasury-yield series, one per maturity -- no API key needed
 # for the plain CSV export. `months` gives the x-axis position (true linear
@@ -116,6 +147,17 @@ CURVE_SERIES = [
 
 _CURVE_TTL = 21600  # 6 hours -- FRED itself only publishes once a day
 _curve_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+
+
+def _iso_utc(epoch: float | int | None) -> str | None:
+    """Render a fetch timestamp without pretending it is the quote timestamp."""
+    if epoch is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(epoch), timezone.utc).isoformat(
+            timespec="seconds")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
 
 
 def _spi200_scrape() -> tuple[float | None, float | None]:
@@ -209,6 +251,39 @@ _FUTURES_STALE_SECONDS = 600
 _FUTURES_IBKR_CLIENT_ID = 88
 
 
+def _active_front_contract(details):
+    """Choose the nearest contract whose expiry has not passed in Sydney.
+
+    IBKR returns expired contracts alongside the current chain when a Future
+    is requested without an expiry.  Sorting the chain alone therefore picked
+    APU6 on 2026-09-18 Sydney time: its recorded expiry was 2026-09-17, so the
+    market-data request returned no last price and AP*0 silently disappeared
+    from the cache.
+
+    Prefer the quarterly cycle (Mar/Jun/Sep/Dec).  SPI also lists serial
+    months, and the day after APU6 expired the nearest unexpired contract was
+    APV6 (October): 33 contracts traded, no last print, so the refresh dropped
+    SPI again (2026-09-18).  The quarterly APZ6 had 25k volume the same
+    minute.  ES/NQ list quarterlies only, so this is a no-op for them.
+    """
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo("Australia/Sydney")).date()
+    active = []
+    for detail in details:
+        raw = str(detail.contract.lastTradeDateOrContractMonth or "")
+        try:
+            expiry = datetime.strptime(raw[:8], "%Y%m%d").date()
+        except ValueError:
+            expiry = None
+        if expiry is None or expiry >= today:
+            active.append((detail, expiry))
+    quarterly = [d for d, e in active if e is not None and e.month in (3, 6, 9, 12)]
+    pool = quarterly or [d for d, _ in active] or list(details)
+    return sorted(pool,
+                  key=lambda d: d.contract.lastTradeDateOrContractMonth)[0].contract
+
+
 def refresh_futures() -> dict[str, Any]:
     """Fetch every futures contract in ONE gateway session and persist them.
 
@@ -249,39 +324,6 @@ def refresh_futures() -> dict[str, Any]:
                     continue
                 out[snap_sym] = {
                     "last": last, "previous_close": prev,
-def _active_front_contract(details):
-    """Choose the nearest contract whose expiry has not passed in Sydney.
-
-    IBKR returns expired contracts alongside the current chain when a Future
-    is requested without an expiry.  Sorting the chain alone therefore picked
-    APU6 on 2026-09-18 Sydney time: its recorded expiry was 2026-09-17, so the
-    market-data request returned no last price and AP*0 silently disappeared
-    from the cache.
-
-    Prefer the quarterly cycle (Mar/Jun/Sep/Dec).  SPI also lists serial
-    months, and the day after APU6 expired the nearest unexpired contract was
-    APV6 (October): 33 contracts traded, no last print, so the refresh dropped
-    SPI again (2026-09-18).  The quarterly APZ6 had 25k volume the same
-    minute.  ES/NQ list quarterlies only, so this is a no-op for them.
-    """
-    from zoneinfo import ZoneInfo
-
-    today = datetime.now(ZoneInfo("Australia/Sydney")).date()
-    active = []
-    for detail in details:
-        raw = str(detail.contract.lastTradeDateOrContractMonth or "")
-        try:
-            expiry = datetime.strptime(raw[:8], "%Y%m%d").date()
-        except ValueError:
-            expiry = None
-        if expiry is None or expiry >= today:
-            active.append((detail, expiry))
-    quarterly = [d for d, e in active if e is not None and e.month in (3, 6, 9, 12)]
-    pool = quarterly or [d for d, _ in active] or list(details)
-    return sorted(pool,
-                  key=lambda d: d.contract.lastTradeDateOrContractMonth)[0].contract
-
-
                     "change_pct": ((last - prev) / prev * 100
                                    if prev else None),
                     "change_pts": round(last - prev, 1) if prev else None,
@@ -362,11 +404,226 @@ def _spi200_last() -> float | None:
     return _spi200_cached()["last"]
 
 
+def _parse_rba_au10y(text: str) -> dict[str, Any] | None:
+    """Extract the latest two Australian 10-year observations from RBA F2."""
+    observations: list[tuple[str, float]] = []
+    for row in csv.reader(io.StringIO(text.lstrip("\ufeff"))):
+        if len(row) < 5 or not re.match(r"^\d{2}-[A-Za-z]{3}-\d{4}$", row[0].strip()):
+            continue
+        try:
+            value = float(row[4].strip())
+        except (TypeError, ValueError):
+            continue
+        observations.append((row[0].strip(), value))
+    if not observations:
+        return None
+    date, last = observations[-1]
+    previous = observations[-2][1] if len(observations) > 1 else None
+    return {
+        "symbol": "AU10Y",
+        "label": "Australia 10Y Govt Yield",
+        "last": last,
+        "previous_close": previous,
+        "change_pct": ((last - previous) / previous * 100
+                       if previous else None),
+        "group": "markets",
+        "source": "rba",
+        "as_of": date,
+    }
+
+
+def _rba_au10y() -> dict[str, Any] | None:
+    now = time.monotonic()
+    if now - _rba_au10y_cache["ts"] < _RBA_AU10Y_TTL:
+        return _rba_au10y_cache["item"]
+    item = None
+    try:
+        response = httpx.get(_RBA_F2_URL, timeout=15)
+        response.raise_for_status()
+        item = _parse_rba_au10y(response.text)
+    except Exception:
+        # Keep the tile in the snapshot even when the source is temporarily
+        # unavailable; the UI will show a dash rather than hiding the signal.
+        item = None
+    _rba_au10y_cache.update({"ts": now, "item": item})
+    return item
+
+
+def _yield_item(symbol: str, label: str, source: str,
+                observations: list[tuple[str, float]]) -> dict[str, Any] | None:
+    if not observations:
+        return None
+    date, last = observations[-1]
+    previous = observations[-2][1] if len(observations) > 1 else None
+    return {
+        "symbol": symbol,
+        "label": label,
+        "last": last,
+        "previous_close": previous,
+        "change_pct": ((last - previous) / previous * 100
+                       if previous else None),
+        "group": "markets",
+        "source": source,
+        "as_of": date,
+    }
+
+
+def _parse_ecb_eu10y(text: str) -> dict[str, Any] | None:
+    observations: list[tuple[str, float]] = []
+    for row in csv.DictReader(io.StringIO(text.lstrip("\ufeff"))):
+        try:
+            observations.append((row["TIME_PERIOD"], float(row["OBS_VALUE"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return _yield_item("EU10Y", "Euro Area 10Y Govt Yield", "ecb", observations)
+
+
+def _parse_boe_uk10y(text: str) -> dict[str, Any] | None:
+    observations: list[tuple[str, float]] = []
+    for row in csv.reader(io.StringIO(text.lstrip("\ufeff"))):
+        if len(row) < 2 or row[0].strip().upper() == "DATE":
+            continue
+        try:
+            observations.append((row[0].strip(), float(row[1].strip())))
+        except (TypeError, ValueError):
+            continue
+    return _yield_item("UK10Y", "UK 10Y Gilt Yield", "boe", observations)
+
+
+def _ecb_eu10y() -> dict[str, Any] | None:
+    now = time.monotonic()
+    if now - _ecb_eu10y_cache["ts"] < _OFFICIAL_YIELD_TTL:
+        return _ecb_eu10y_cache["item"]
+    item = _ecb_eu10y_cache["item"]
+    try:
+        response = httpx.get(
+            _ECB_EU10Y_URL,
+            params={"format": "csvdata", "lastNObservations": "2"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        item = _parse_ecb_eu10y(response.text) or item
+    except Exception:
+        pass
+    _ecb_eu10y_cache.update({"ts": now, "item": item})
+    return item
+
+
+def _boe_uk10y() -> dict[str, Any] | None:
+    now = time.monotonic()
+    if now - _boe_uk10y_cache["ts"] < _OFFICIAL_YIELD_TTL:
+        return _boe_uk10y_cache["item"]
+    item = _boe_uk10y_cache["item"]
+    try:
+        response = httpx.get(
+            _BOE_UK10Y_URL,
+            params={
+                "csv.x": "yes", "Datefrom": "01/Jan/2020", "Dateto": "now",
+                "SeriesCodes": "IUDMNPY", "CSVF": "TN", "UsingCodes": "Y",
+                "VPD": "Y", "VFD": "N",
+            },
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        item = _parse_boe_uk10y(response.text) or item
+    except Exception:
+        pass
+    _boe_uk10y_cache.update({"ts": now, "item": item})
+    return item
+
+
+def _parse_tradingview_yield(payload: dict[str, Any], symbol: str,
+                              label: str) -> dict[str, Any] | None:
+    """Parse a TradingView public scanner quote for a live 10Y yield."""
+    rows = payload.get("data") or []
+    if not rows or len(rows[0].get("d") or []) < 3:
+        return None
+    values = rows[0]["d"]
+    try:
+        last = float(values[0])
+        change_pct = float(values[1])
+        change_abs = float(values[2])
+    except (TypeError, ValueError):
+        return None
+    if not all(map(lambda x: x == x, (last, change_pct, change_abs))):
+        return None
+    return {
+        "symbol": symbol,
+        "label": label,
+        "last": last,
+        "previous_close": round(last - change_abs, 6),
+        "change_pct": change_pct,
+        "group": "markets",
+        "source": "tradingview",
+        "as_of": "live",
+    }
+
+
+def _parse_tradingview_uk10y(payload: dict[str, Any]) -> dict[str, Any] | None:
+    return _parse_tradingview_yield(payload, "UK10Y", "UK 10Y Gilt Yield")
+
+
+def _parse_tradingview_au10y(payload: dict[str, Any]) -> dict[str, Any] | None:
+    return _parse_tradingview_yield(payload, "AU10Y", "Australia 10Y Govt Yield")
+
+
+def _tradingview_uk10y() -> dict[str, Any] | None:
+    now = time.monotonic()
+    if now - _tradingview_uk10y_cache["ts"] < _TRADINGVIEW_UK10Y_TTL:
+        return _tradingview_uk10y_cache["item"]
+    item = _tradingview_uk10y_cache["item"]
+    try:
+        response = httpx.post(
+            _TRADINGVIEW_SCANNER_URL,
+            json={
+                "symbols": {"tickers": ["TVC:GB10Y"], "query": {"types": []}},
+                "columns": ["close", "change", "change_abs"],
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        item = _parse_tradingview_uk10y(response.json()) or item
+    except Exception:
+        pass
+    _tradingview_uk10y_cache.update({"ts": now, "item": item})
+    return item
+
+
+def _tradingview_au10y() -> dict[str, Any] | None:
+    now = time.monotonic()
+    if now - _tradingview_au10y_cache["ts"] < _TRADINGVIEW_UK10Y_TTL:
+        return _tradingview_au10y_cache["item"]
+    item = _tradingview_au10y_cache["item"]
+    try:
+        response = httpx.post(
+            _TRADINGVIEW_SCANNER_URL,
+            json={
+                "symbols": {"tickers": ["TVC:AU10Y"], "query": {"types": []}},
+                "columns": ["close", "change", "change_abs"],
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        item = _parse_tradingview_au10y(response.json()) or item
+    except Exception:
+        pass
+    _tradingview_au10y_cache.update({"ts": now, "item": item})
+    return item
+
+
+def _empty_yield_item(symbol: str, label: str, source: str) -> dict[str, Any]:
+    return {"symbol": symbol, "label": label, "last": None,
+            "previous_close": None, "change_pct": None, "group": "markets",
+            "source": source}
+
+
 def get_snapshot() -> dict[str, Any]:
     now = time.monotonic()
     if _snapshot_cache["data"] is not None and now - _snapshot_cache["ts"] < _SNAPSHOT_TTL:
         return _snapshot_cache["data"]
 
+    snapshot_fetched_at = time.time()
     symbols = [sym for sym, _ in SNAPSHOT_TICKERS]
     tickers = yf.Tickers(" ".join(symbols))
     items = []
@@ -376,7 +633,12 @@ def get_snapshot() -> dict[str, Any]:
                  "previous_close": None, "change_pct": None,
                  "group": ("futures" if sym in FUTURES_SYMBOLS
                            else "international" if sym in INTERNATIONAL_SYMBOLS
-                           else "markets")}
+                           else "markets"),
+                 # fast_info does not expose a reliable exchange quote time.
+                 # This is deliberately labelled as a fetch/check time, not
+                 # as if Yahoo had supplied a tick timestamp.
+                 "source": "yahoo",
+                 "fetched_at": snapshot_fetched_at}
         try:
             info = tickers.tickers[sym].fast_info
             last, prev = info.last_price, info.previous_close
@@ -389,38 +651,71 @@ def get_snapshot() -> dict[str, Any]:
             pass
         items.append(entry)
 
+    # RBA F2 is authoritative but currently lags the live market by several
+    # sessions. Use the live quote for the dashboard and retain RBA fallback.
+    au10y = _tradingview_au10y() or _rba_au10y()
+    items.append(au10y or _empty_yield_item("AU10Y", "Australia 10Y Govt Yield", "rba"))
+    eu10y = _ecb_eu10y()
+    items.append(eu10y or _empty_yield_item("EU10Y", "Euro Area 10Y Govt Yield", "ecb"))
+    # The BoE series is authoritative but normally lags by 1–2 working days.
+    # Use the live market quote for the dashboard and retain BoE as fallback.
+    uk10y = _tradingview_uk10y() or _boe_uk10y()
+    items.append(uk10y or _empty_yield_item("UK10Y", "UK 10Y Gilt Yield", "boe"))
+    for entry in items:
+        entry.setdefault("fetched_at", snapshot_fetched_at)
+
     # Override the Yahoo rows with IBKR where the cache is fresh. Yahoo stays
     # as the fallback so the panel degrades to a stale-but-labelled number
     # rather than to nothing.
     fut = _futures_cached()
+    fut_items = fut.get("items") or {}
     fut_age = time.time() - (fut.get("fetched_at") or 0)
-    fut_fresh = bool(fut.get("items")) and fut_age < _FUTURES_STALE_SECONDS
+    fut_fresh = bool(fut_items) and fut_age < _FUTURES_STALE_SECONDS
+    required_futures = {"ES=F", "NQ=F", "AP*0"}
+    fut_complete = required_futures.issubset(fut_items)
     if fut_fresh:
         for entry in items:
-            hit = fut["items"].get(entry["symbol"])
+            hit = fut_items.get(entry["symbol"])
             if hit:
                 entry.update({k: hit[k] for k in
                               ("last", "previous_close", "change_pct")})
                 entry["source"] = "ibkr"
                 entry["contract"] = hit.get("contract")
+                entry["fetched_at"] = fut.get("fetched_at")
+                entry["data_age_seconds"] = max(0, int(fut_age))
     else:
         for entry in items:
             if entry.get("group") == "futures":
                 entry["source"] = "yahoo-fallback"
 
-    spi_hit = fut["items"].get("AP*0") if fut_fresh else None
+    spi_hit = fut_items.get("AP*0") if fut_fresh else None
     spi_cached = _spi200_cached()
-    spi_last = spi_hit["last"] if spi_hit else spi_cached["last"]
-    spi_vs_xjo_pts = (spi_last - axjo_prev
-                      if spi_last is not None and axjo_prev else None)
+    spi_data = spi_hit or spi_cached
+    spi_last = spi_data.get("last")
+    # The SPI tile must use the futures contract's own settlement for its
+    # displayed percentage. Comparing a futures level with the cash ASX close
+    # is a useful implied-open measure, but it is not the futures' move.
+    spi_previous = spi_data.get("previous_close")
+    if spi_previous is None and spi_last is not None and spi_data.get("change_pts") is not None:
+        spi_previous = spi_last - spi_data["change_pts"]
+    spi_change_pts = (spi_last - spi_previous
+                      if spi_last is not None and spi_previous is not None else None)
+    spi_implied_pts = (spi_last - axjo_prev
+                       if spi_last is not None and axjo_prev else None)
     items.append({
         "group": "futures",
-        "source": "ibkr" if spi_hit else "cache",
-        "contract": (spi_hit or {}).get("contract"),
+        "source": spi_data.get("source") or ("ibkr" if spi_hit else "cache"),
+        "fetched_at": spi_data.get("fetched_at") if not spi_hit else fut.get("fetched_at"),
+        "data_age_seconds": (max(0, int(fut_age)) if spi_hit else
+                              max(0, int(time.time() - (spi_data.get("fetched_at") or 0)))
+                              if spi_data.get("fetched_at") else None),
+        "contract": spi_data.get("contract"),
         "symbol": "AP*0", "label": "SPI 200 (futures)",
-        "last": spi_last, "previous_close": axjo_prev,
-        "change_pct": (spi_vs_xjo_pts / axjo_prev * 100
-                       if spi_vs_xjo_pts is not None else None),
+        "last": spi_last, "previous_close": spi_previous,
+        "change_pct": (spi_change_pts / spi_previous * 100
+                       if spi_change_pts is not None and spi_previous else None),
+        "implied_open_pct": (spi_implied_pts / axjo_prev * 100
+                              if spi_implied_pts is not None and axjo_prev else None),
     })
     # "Expected open" the way it's actually quoted (e.g. a forum poster the
     # user follows: "-28" for the morning of 2026-08-21) is the futures'
@@ -439,18 +734,24 @@ def get_snapshot() -> dict[str, Any]:
         "symbol": "AP*0-CHG", "label": "Expected Open (SPI overnight move)",
         "last": (spi_hit or spi_cached).get("change_pts"), "previous_close": None,
         "change_pct": None, "is_point_diff": True,
-        "source": "ibkr" if spi_hit else "cache",
+        "source": spi_data.get("source") or ("ibkr" if spi_hit else "cache"),
+        "fetched_at": spi_data.get("fetched_at") if not spi_hit else fut.get("fetched_at"),
+        "data_age_seconds": (max(0, int(fut_age)) if spi_hit else
+                              max(0, int(time.time() - (spi_data.get("fetched_at") or 0)))
+                              if spi_data.get("fetched_at") else None),
     })
 
     # Surfaced on the dashboard. A futures panel that silently shows a stale
     # number is worse than one that says it is stale: the whole point of these
     # rows is what is happening NOW.
     futures_status = {
-        "ok": fut_fresh and not fut.get("error"),
+        "ok": fut_fresh and fut_complete and not fut.get("error"),
         "source": "ibkr" if fut_fresh else "yahoo-fallback",
         "age_seconds": int(fut_age) if fut.get("fetched_at") else None,
         "stale_after_seconds": _FUTURES_STALE_SECONDS,
         "error": fut.get("error") or (
+            f"IBKR futures cache is missing: {', '.join(sorted(required_futures - set(fut_items)))}"
+            if fut_fresh and not fut_complete else
             f"IBKR futures cache is {int(fut_age // 60)} min old "
             f"(stale after {_FUTURES_STALE_SECONDS // 60} min) -- showing "
             f"delayed Yahoo values, which do not track the overnight session"
@@ -466,7 +767,8 @@ def get_snapshot() -> dict[str, Any]:
             entry["is_open"] = is_open(entry["symbol"])
 
     data = {"items": items, "futures_status": futures_status,
-            "fetched_at": time.time()}
+            "fetched_at": snapshot_fetched_at,
+            "checked_at": _iso_utc(snapshot_fetched_at)}
     _snapshot_cache["ts"] = now
     _snapshot_cache["data"] = data
     return data

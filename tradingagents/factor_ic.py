@@ -60,9 +60,8 @@ MIN_DATES_FOR_T = 10
 
 # (label, factor column, return column, benchmark column or None)
 VARIANTS: tuple[tuple[str, str, str, str | None], ...] = (
-    ("same-day open->close", "score", "open_close_pct", None),
-    ("same-day, sector-relative", "score", "open_close_pct", "sect_open_close_pct"),
-    ("full day (prev close)", "score", "full_day_pct", "sect_full_day_pct"),
+    ("entry-day open->close", "score", "open_close_pct", None),
+    ("entry-day, sector-relative", "score", "open_close_pct", "sect_open_close_pct"),
     ("1-day forward", "score", "fwd_1d_pct", None),
     ("1-day, sector-relative", "score", "fwd_1d_pct", "sect_1d_pct"),
     ("3-day, sector-relative", "score", "fwd_3d_pct", "sect_3d_pct"),
@@ -82,11 +81,12 @@ def _frame():
     cols = {"as_of", "ticker", "score"}
     for _, f, r, b in VARIANTS:
         cols |= {f, r} | ({b} if b else set())
-    with _connect() as conn:
-        have = {row[1] for row in conn.execute("PRAGMA table_info(signal_outcomes)")}
+    with _connect(prospective=True) as conn:
+        have = {row[1] for row in conn.execute("PRAGMA table_info(document_signal_outcomes)")}
         sel = sorted(c for c in cols if c in have)
         df = pd.read_sql(
-            f"SELECT {', '.join(sel)} FROM signal_outcomes WHERE score IS NOT NULL",
+            f"SELECT {', '.join(sel)} FROM document_signal_outcomes WHERE score IS NOT NULL "
+            "AND evaluation_basis='first_open_after_score'",
             conn)
     return df.rename(columns={"as_of": "trade_date"})
 
@@ -95,7 +95,7 @@ def compute(min_names: int = MIN_NAMES) -> dict[str, Any]:
     import pandas as pd
     df = _frame()
     if df.empty:
-        return {"error": "no scored mover-days yet", "rows": []}
+        return {"error": "No completed document-score outcomes yet", "rows": []}
 
     out = []
     for label, fcol, rcol, bcol in VARIANTS:
@@ -136,6 +136,7 @@ def compute(min_names: int = MIN_NAMES) -> dict[str, Any]:
                     if ir and abs(ir) > 1e-9 else None)
         out.append(row)
     return {"rows": out, "benchmarks": BENCHMARKS, "min_names": min_names,
+            "entry_basis": "First session open after the document-backed score became available; returns measured from that open.",
             "target_t": TARGET_T, "min_dates_for_t": MIN_DATES_FOR_T,
             "total_scored_rows": int(len(df)),
             "sessions": int(df["trade_date"].nunique())}

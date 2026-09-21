@@ -35,7 +35,9 @@ harder on a real one.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,6 +48,9 @@ import yfinance as yf
 from tradingagents.backtest import DEFAULT_BROKERAGE_PCT, tick_size
 
 ASX_DB = "/opt/asxbrief/data/asx.db"
+YFINANCE_TIMEOUT_SECONDS = 30
+YFINANCE_RETRIES = 3
+logger = logging.getLogger(__name__)
 
 # Screen thresholds. Deliberately named constants rather than inline magic --
 # these are the knobs a future session will want to move, and moving them
@@ -104,18 +109,49 @@ def bulk_daily(tickers: list[str], period: str = "3y", batch: int = 60) -> dict[
     out: dict[str, pd.DataFrame] = {}
     for i in range(0, len(tickers), batch):
         chunk = tickers[i:i + batch]
-        data = yf.download(
-            [f"{t}.AX" for t in chunk], period=period, interval="1d",
-            group_by="ticker", auto_adjust=True, threads=True, progress=False,
-        )
+        data = None
+        for attempt in range(1, YFINANCE_RETRIES + 1):
+            try:
+                data = yf.download(
+                    [f"{t}.AX" for t in chunk], period=period, interval="1d",
+                    group_by="ticker", auto_adjust=True, threads=True, progress=False,
+                    timeout=YFINANCE_TIMEOUT_SECONDS,
+                )
+                if data is not None and not data.empty:
+                    break
+                logger.warning("Yahoo daily batch returned no rows (attempt %d/%d): %s..%s",
+                               attempt, YFINANCE_RETRIES, chunk[0], chunk[-1])
+            except Exception as exc:
+                logger.warning("Yahoo daily batch failed (attempt %d/%d; %s..%s): %s",
+                               attempt, YFINANCE_RETRIES, chunk[0], chunk[-1], exc)
+            if attempt < YFINANCE_RETRIES:
+                time.sleep(attempt)
+
+        missing: list[str] = []
         for t in chunk:
             key = f"{t}.AX"
             try:
-                df = data[key].dropna(subset=["Close"])
-            except KeyError:
-                continue
+                df = data[key].dropna(subset=["Close"]) if data is not None else pd.DataFrame()
+            except (KeyError, TypeError):
+                df = pd.DataFrame()
             if not df.empty:
                 out[t] = df
+            else:
+                missing.append(t)
+
+        # Yahoo occasionally returns a partial multi-ticker response. Retry
+        # the missing names individually so one bad symbol cannot turn the
+        # whole morning into a false no-data abstain.
+        for t in missing:
+            try:
+                df = yf.Ticker(f"{t}.AX").history(
+                    period=period, interval="1d", auto_adjust=True,
+                    timeout=YFINANCE_TIMEOUT_SECONDS,
+                )
+                if df is not None and not df.empty and "Close" in df:
+                    out[t] = df.dropna(subset=["Close"])
+            except Exception as exc:
+                logger.warning("Yahoo per-ticker fallback failed (%s): %s", t, exc)
     return out
 
 

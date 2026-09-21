@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS swing_trades (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS swing_order_fills (
+    trade_id INTEGER NOT NULL, order_id INTEGER NOT NULL, role TEXT NOT NULL,
+    quantity REAL NOT NULL, price REAL,
+    PRIMARY KEY(trade_id, order_id)
+);
 """
 
 # Added 2026-08-21 for the range-model daily-refresh mechanic (phase-3 §6):
@@ -67,6 +72,11 @@ _TRADES_MIGRATIONS = [
     "ALTER TABLE swing_trades ADD COLUMN strategy TEXT NOT NULL DEFAULT 'heuristic'",
     "ALTER TABLE swing_trades ADD COLUMN atr_at_entry REAL",
     "ALTER TABLE swing_trades ADD COLUMN target_order_date TEXT",
+    "ALTER TABLE swing_trades ADD COLUMN filled_shares REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE swing_trades ADD COLUMN target_filled REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE swing_trades ADD COLUMN stop_filled REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE swing_trades ADD COLUMN target_fill_price REAL",
+    "ALTER TABLE swing_trades ADD COLUMN stop_fill_price REAL",
 ]
 
 # Statuses that mean "don't propose a new trade for this ticker" -- there's
@@ -74,7 +84,7 @@ _TRADES_MIGRATIONS = [
 # range_model day-orders that didn't fill by end of day) is deliberately NOT
 # active -- tomorrow's propose job should generate a fresh proposal, not wait
 # on an order the exchange has already cancelled.
-ACTIVE_STATUSES = ("proposed", "submitted", "open")
+ACTIVE_STATUSES = ("proposed", "submitting", "submitted", "partial", "open", "attention", "error")
 
 DEFAULT_TRADE_DOLLARS = 20_000.0
 
@@ -181,6 +191,33 @@ def get_trade(trade_id: int) -> dict[str, Any] | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM swing_trades WHERE id=?", (trade_id,)).fetchone()
     return dict(row) if row else None
+
+
+def claim_proposal(trade_id: int) -> bool:
+    with _connect() as conn:
+        cur = conn.execute("UPDATE swing_trades SET status='submitting', updated_at=? WHERE id=? AND status='proposed'",
+                           (_utcnow(), trade_id))
+        conn.commit()
+        return cur.rowcount == 1
+
+
+def record_order_fills(trade: dict, statuses: dict) -> dict:
+    """Keep cumulative fills per broker order, including replaced exit orders."""
+    with _connect() as conn:
+        for role in ("parent", "target", "stop"):
+            oid = trade.get(f"ibkr_{role}_id")
+            current = statuses.get(oid, {})
+            if oid and current.get("filled", 0) > 0:
+                conn.execute(
+                    "INSERT INTO swing_order_fills VALUES(?,?,?,?,?) "
+                    "ON CONFLICT(trade_id,order_id) DO UPDATE SET quantity=excluded.quantity,price=excluded.price "
+                    "WHERE excluded.quantity >= swing_order_fills.quantity",
+                    (trade["id"], oid, role, current["filled"], current.get("fill_price")))
+        rows = conn.execute("SELECT role, SUM(quantity) q, "
+                            "CASE WHEN COUNT(price)=COUNT(*) THEN SUM(quantity*price)/SUM(quantity) END p "
+                            "FROM swing_order_fills WHERE trade_id=? GROUP BY role", (trade["id"],)).fetchall()
+        conn.commit()
+    return {r["role"]: (r["q"], r["p"]) for r in rows}
 
 
 def update_trade(trade_id: int, **fields: Any) -> None:

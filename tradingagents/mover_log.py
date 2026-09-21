@@ -39,6 +39,8 @@ alongside this module.
 from __future__ import annotations
 
 import sqlite3
+import json
+from zoneinfo import ZoneInfo
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,20 @@ CREATE TABLE IF NOT EXISTS mover_log (
     finalized   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (ticker, trade_date)
 );
+CREATE TABLE IF NOT EXISTS mover_observations (
+    id INTEGER PRIMARY KEY,
+    ticker TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    observed_price REAL,
+    ai_score INTEGER,
+    ai_scored_at TEXT,
+    model TEXT,
+    prompt_version TEXT,
+    snapshot_json TEXT NOT NULL,
+    UNIQUE(ticker, trade_date, observed_at)
+);
+CREATE INDEX IF NOT EXISTS idx_mover_observation_time ON mover_observations(ticker, trade_date, observed_at);
 """
 
 # Announcement context, snapshotted onto the row at log time rather than
@@ -121,10 +137,19 @@ def log_movers(rows: list[dict[str, Any]], as_of: str | None = None) -> int:
     n = 0
     with _connect() as conn:
         for r in rows:
+            if r.get("is_stale"):
+                continue
             if r.get("last") is None or r.get("prev_close") is None or r.get("open") is None:
                 continue
             bar_high = r.get("high") if r.get("high") is not None else r["last"]
             bar_low = r.get("low") if r.get("low") is not None else r["last"]
+            conn.execute(
+                "INSERT OR IGNORE INTO mover_observations "
+                "(ticker, trade_date, observed_at, observed_price, ai_score, ai_scored_at, model, prompt_version, snapshot_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (r["ticker"], day, now, r["last"], r.get("ai_score"), r.get("ai_scored_at"),
+                 r.get("ai_model"), r.get("ai_prompt_version"), json.dumps(r, default=str)),
+            )
             existing = conn.execute(
                 "SELECT high, low FROM mover_log WHERE ticker=? AND trade_date=?",
                 (r["ticker"], day),
@@ -160,13 +185,13 @@ def log_movers(rows: list[dict[str, Any]], as_of: str | None = None) -> int:
                     "UPDATE mover_log SET prev_close=?, open=?, high=?, low=?, close=?,"
                     " last_seen_at=?, n_scans=n_scans+1,"
                     " n_announcements=COALESCE(?, n_announcements),"
-                    " ai_score=COALESCE(?, ai_score), ai_is_net=COALESCE(?, ai_is_net),"
+                    " ai_score=ai_score, ai_is_net=ai_is_net,"
                     " has_price_sensitive=COALESCE(?, has_price_sensitive),"
                     " top_headline=COALESCE(?, top_headline),"
                     " announcement_url=COALESCE(?, announcement_url) "
                     "WHERE ticker=? AND trade_date=?",
                     (r["prev_close"], r["open"], high, low, r["last"], now,
-                     *_annotation_values(r), r["ticker"], day),
+                     *_annotation_values(r)[:1], *_annotation_values(r)[3:], r["ticker"], day),
                 )
             else:
                 conn.execute(
@@ -211,7 +236,7 @@ def finalize_pending(days_back: int = 7, period: str = "1mo") -> dict[str, Any]:
 
     from tradingagents.yf_lock import YF_LOCK
 
-    now_syd = datetime.now(timezone.utc) + timedelta(hours=10)
+    now_syd = datetime.now(ZoneInfo("Australia/Sydney"))
     today_syd = now_syd.date()
     session_over_today = now_syd.hour >= 16
     since = (today_syd - timedelta(days=days_back)).isoformat()
@@ -459,6 +484,9 @@ def backfill_announcements(day: str | None = None, overwrite: bool = False) -> d
     from .asx_signals import get_signals_for, get_ticker_signals
 
     where = "n_announcements IS NULL" if not overwrite else "1=1"
+    # Backfills must never rewrite scores captured at an actual observation.
+    where += (" AND NOT EXISTS (SELECT 1 FROM mover_observations o WHERE "
+              "o.ticker=mover_log.ticker AND o.trade_date=mover_log.trade_date)")
     params: list[Any] = []
     if day:
         where += " AND trade_date=?"

@@ -423,8 +423,11 @@
     border-top: 1px solid rgba(255,255,255,0.03);
   }
   .col-row:hover { background: var(--surface2); }
+  .col-row-main { min-width: 0; }
   .col-row-ticker { font-size: 13px; font-weight: 700; }
-  .col-row-date   { font-size: 11px; color: #aaa; }
+  .col-row-date   { font-size: 11px; color: #aaa; margin-left: 6px; }
+  .col-row-summary { margin-top: 3px; color: #9d9dbd; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .col-row-summary.warn { color: #fbbf24; }
 
   .col-loading { padding: 20px; text-align: center; color: var(--muted); font-size: 12px; }
 
@@ -476,18 +479,21 @@
     asxagents<span class="app">.app</span>
   </a>
   <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
     <a href="/performance">Performance</a>
     <a href="/asx">ASX</a>
+    <a href="/recommendations">Morning Picks</a>
     <a href="/research">Patterns</a>
     <a href="/swing">Swing</a>
     <a href="/backtest">Backtest</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/setups">TechA</a>
     <a href="/watchlist">Watchlist</a>
+    <a href="/sync">Sync</a>
     <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
     <a id="auth-nav-link" href="/login">Login</a>
   </nav>
 </header>
-    <a href="/scanner">Scanner</a>
-    <a href="/setups">TechA</a>
 
 <!-- ── Hero ── -->
 <section class="hero">
@@ -645,13 +651,32 @@
         <div class="col-rows">
           ${top5.map(r => `
             <div class="col-row" onclick="goReport('${esc(r.ticker)}')">
-              <span class="col-row-ticker">${esc(r.ticker)}</span>
-              <span class="col-row-date">${esc(r.date)}</span>
+              <div class="col-row-main">
+                <span class="col-row-ticker">${esc(r.ticker)}</span>
+                <span class="col-row-date">${esc(r.date)}</span>
+                <div class="col-row-summary ${r.quality_status && r.quality_status !== 'ok' ? 'warn' : ''}">${summaryText(r)}</div>
+              </div>
             </div>`).join('')}
         </div>`;
 
       grid.appendChild(col);
     }
+  }
+
+  function summaryText(r) {
+    const bits = [];
+    if (r.score != null) bits.push(`Score ${r.score}`);
+    if (r.entry_price != null) bits.push(`Entry ${fmtPrice(r.entry_price)}`);
+    if (r.stop_loss != null) bits.push(`Stop ${fmtPrice(r.stop_loss)}`);
+    if (r.price_target != null) bits.push(`Target ${fmtPrice(r.price_target)}`);
+    if (r.quality_status && r.quality_status !== 'ok') bits.push('⚠ data check');
+    return bits.length ? bits.join(' · ') : 'No action levels recorded';
+  }
+
+  function fmtPrice(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    return n < 1 ? n.toFixed(3) : n.toFixed(2);
   }
 
   function goReport(ticker) {
@@ -740,9 +765,8 @@
   // ── Auth nav ────────────────────────────────────────────────────────────────
   fetch('/api/auth/status').then(r => r.json()).then(d => {
     if (d.authenticated) {
-      const el = document.getElementById('auth-nav-link');
-      el.href = '/analysis';
-      el.textContent = 'Run Analysis';
+      document.getElementById('analysis-nav-link').style.display = '';
+      document.getElementById('auth-nav-link').style.display = 'none';
       document.getElementById('reports-nav-link').style.display = '';
     }
   }).catch(() => {});

@@ -10,6 +10,7 @@ import os
 import sys
 import traceback
 import uuid
+import secrets
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -20,11 +21,40 @@ from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel
 
+from tradingagents.report_quality import build_action_summary, validate_report_state
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 app = FastAPI(title="TradingAgents Web")
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.on_event("startup")
+async def start_swing_reconciliation():
+    async def reconcile():
+        from tradingagents import swing, swing_db
+        import logging
+        while True:
+            try:
+                active = await asyncio.to_thread(swing_db.list_trades)
+                if any(t["status"] in swing_db.ACTIVE_STATUSES and t.get("ibkr_parent_id") for t in active):
+                    await asyncio.to_thread(swing.sync_all)
+            except Exception:
+                logging.getLogger(__name__).exception("Swing reconciliation failed")
+            await asyncio.sleep(5)
+    app.state.swing_reconciliation = asyncio.create_task(reconcile())
+
+
+@app.on_event("shutdown")
+async def stop_swing_reconciliation():
+    task = getattr(app.state, "swing_reconciliation", None)
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 # Reports are stored under ~/.tradingagents/logs (respects TRADINGAGENTS_RESULTS_DIR override)
 _HOME = Path.home() / ".tradingagents"
@@ -33,13 +63,10 @@ COMPANY_DIR = _HOME / "company_info"
 COMPANY_DIR.mkdir(exist_ok=True)
 
 # Auth config
-_SECRET_KEY = "138e54e633b69c30efb52175f90b80adf92bb646d02a5216b6666db167bec88c"
-# Was hardcoded here despite /etc/tradingagents/env already defining
-# TRADINGAGENTS_WEB_PASSWORD -- that env var was silently ignored (found
-# 2026-08-21 while wiring up site-wide auth). Now actually read, falling back
-# to the old hardcoded value only so existing deployments don't break if the
-# env var isn't set.
-_ANALYSIS_PASSWORD = os.environ.get("TRADINGAGENTS_WEB_PASSWORD", "gIZMRdploEpq0K7V")
+_SECRET_KEY = os.environ.get("TRADINGAGENTS_SESSION_SECRET", "")
+_ANALYSIS_PASSWORD = os.environ.get("TRADINGAGENTS_WEB_PASSWORD", "")
+if len(_SECRET_KEY) < 32 or not _ANALYSIS_PASSWORD:
+    raise RuntimeError("Set TRADINGAGENTS_SESSION_SECRET (at least 32 characters) and TRADINGAGENTS_WEB_PASSWORD")
 _SESSION_COOKIE = "ta_session"
 _SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 _signer = URLSafeTimedSerializer(_SECRET_KEY)
@@ -50,8 +77,7 @@ def _is_authenticated(request: Request) -> bool:
     if not token:
         return False
     try:
-        _signer.loads(token, max_age=_SESSION_MAX_AGE)
-        return True
+        return _signer.loads(token, max_age=_SESSION_MAX_AGE) == "authenticated"
     except (BadSignature, SignatureExpired):
         return False
 
@@ -81,12 +107,16 @@ _LOCAL_OR_AUTH_PATHS = {
     "/api/patterns/openhigh-review", "/api/patterns/tuning-lane/score",
     "/api/asx/signals/health", "/api/health/freshness",
     "/api/markets/spi200/refresh", "/api/markets/futures/refresh", "/api/swing/propose", "/api/swing/sync",
+    "/api/recommendations/generate",
+    "/api/setups/scan", "/api/setups/resolve", "/api/setups/backfill",
 }
 
 
 @app.middleware("http")
 async def require_auth(request: Request, call_next):
     path = request.url.path
+    if path.startswith("/static/") and Path(path).suffix.lower() not in {".html", ".css", ".js", ".svg", ".png", ".jpg", ".ico"}:
+        return JSONResponse({"detail": "Not found"}, status_code=404)
     if path.startswith("/static") or path in _PUBLIC_PATHS:
         return await call_next(request)
     if path in _LOCAL_OR_AUTH_PATHS and request.client and request.client.host in ("127.0.0.1", "::1"):
@@ -107,17 +137,59 @@ _REPORT_FIELDS = [
     ("final_trade_decision",  "Decision"),
     ("market_report",         "Market"),
     ("sentiment_report",      "Sentiment"),
-    "/api/recommendations/generate",
-    "/api/setups/scan", "/api/setups/resolve", "/api/setups/backfill",
     ("news_report",           "News"),
     ("fundamentals_report",   "Fundamentals"),
     ("short_interest_report", "Short Interest"),
     ("investment_plan",       "Research"),
     ("trader_investment_plan","Trader"),
-]
+ ]
+
+
+def _read_report_payload(ticker: str, date: str) -> dict[str, Any] | None:
+    ticker_dir = LOGS_DIR / ticker
+    reports_dir = ticker_dir / date / "reports"
+    if reports_dir.exists():
+        data: dict[str, Any] = {"trade_date": date, "company_of_interest": ticker}
+        for key, _ in _REPORT_FIELDS:
+            for stem in (key, key.replace("trader_investment_plan", "trader_investment_decision")):
+                md = reports_dir / f"{stem}.md"
+                if md.exists():
+                    data[key] = md.read_text()
+                    break
+        return data
+    legacy = ticker_dir / "TradingAgentsStrategy_logs" / f"full_states_log_{date}.json"
+    if not legacy.exists():
+        return None
+    raw = json.loads(legacy.read_text())
+    return {
+        "company_of_interest": raw.get("company_of_interest", ticker),
+        "trade_date": raw.get("trade_date", date),
+        "final_trade_decision": raw.get("final_trade_decision") or "",
+        "market_report": raw.get("market_report") or "",
+        "sentiment_report": raw.get("sentiment_report") or "",
+        "news_report": raw.get("news_report") or "",
+        "fundamentals_report": raw.get("fundamentals_report") or "",
+        "short_interest_report": raw.get("short_interest_report") or "",
+        "investment_plan": raw.get("investment_plan") or "",
+        "trader_investment_plan": raw.get("trader_investment_plan") or raw.get("trader_investment_decision") or "",
+        "report_quality": raw.get("report_quality"),
+    }
+
+
+def _report_summary(ticker: str, date: str, data: dict[str, Any]) -> dict[str, Any]:
+    summary = build_action_summary(data)
+    quality = data.get("report_quality") or validate_report_state({**data, "trade_date": data.get("trade_date", date)})
+    summary["quality_status"] = quality.get("status", "ok")
+    summary["quality_warnings"] = quality.get("warnings", [])
+    summary["missing_reports"] = quality.get("missing_reports", [])
+    return summary
 
 _jobs: Dict[str, asyncio.Queue] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
+# Recommendation ranking can take several minutes while Yahoo and announcement
+# data are fetched. Keep it out of the shared pool so scanner/swing/EOD jobs
+# cannot starve the scheduled morning run.
+_recommendations_executor = ThreadPoolExecutor(max_workers=1)
 
 # Nodes to suppress in the progress feed
 _SKIP_PREFIXES = ("Msg Clear ", "tools_", "__")
@@ -228,8 +300,8 @@ async def login_page(request: Request):
 
 
 @app.post("/api/login")
-async def do_login(password: str = Form(...)):
-    if password != _ANALYSIS_PASSWORD:
+async def do_login(request: Request, password: str = Form(...)):
+    if not secrets.compare_digest(password.encode(), _ANALYSIS_PASSWORD.encode()):
         return RedirectResponse("/login?error=1", status_code=302)
     token = _signer.dumps("authenticated")
     response = RedirectResponse("/analysis", status_code=302)
@@ -239,6 +311,7 @@ async def do_login(password: str = Form(...)):
         max_age=_SESSION_MAX_AGE,
         httponly=True,
         samesite="lax",
+        secure=os.environ.get("TRADINGAGENTS_COOKIE_SECURE", str(request.url.scheme == "https")).lower() == "true",
     )
     return response
 
@@ -284,14 +357,23 @@ async def list_reports():
             if not date_dir.is_dir() or date_dir.name == "TradingAgentsStrategy_logs":
                 continue
             if (date_dir / "reports").exists():
-                entries.append({"ticker": ticker, "date": date_dir.name})
+                date = date_dir.name
+                data = _read_report_payload(ticker, date) or {}
+                summary = _report_summary(ticker, date, data)
+                entries.append({"ticker": ticker, "date": date,
+                                "signal": (summary.get("rating") or "UNKNOWN").upper().replace(" ", "_"),
+                                **summary})
 
         # Legacy format: logs/{ticker}/TradingAgentsStrategy_logs/full_states_log_{date}.json
         legacy_dir = ticker_dir / "TradingAgentsStrategy_logs"
         if legacy_dir.exists():
             for f in sorted(legacy_dir.glob("full_states_log_*.json"), reverse=True):
                 date = f.stem.replace("full_states_log_", "")
-                entries.append({"ticker": ticker, "date": date})
+                data = _read_report_payload(ticker, date) or {}
+                summary = _report_summary(ticker, date, data)
+                entries.append({"ticker": ticker, "date": date,
+                                "signal": (summary.get("rating") or "UNKNOWN").upper().replace(" ", "_"),
+                                **summary})
 
     return entries
 
@@ -314,22 +396,13 @@ async def get_report(ticker: str, date: str):
                     break
         return data
 
-    # Legacy JSON format
-    legacy = ticker_dir / "TradingAgentsStrategy_logs" / f"full_states_log_{date}.json"
-    if legacy.exists():
-        raw = json.loads(legacy.read_text())
-        return {
-            "final_trade_decision":  raw.get("final_trade_decision") or "",
-            "market_report":         raw.get("market_report") or "",
-            "sentiment_report":      raw.get("sentiment_report") or "",
-            "news_report":           raw.get("news_report") or "",
-            "fundamentals_report":   raw.get("fundamentals_report") or "",
-            "short_interest_report": raw.get("short_interest_report") or "",
-            "investment_plan":       raw.get("investment_plan") or "",
-            # legacy key name differs
-            "trader_investment_plan": raw.get("trader_investment_plan")
-                                   or raw.get("trader_investment_decision") or "",
-        }
+    data = _read_report_payload(ticker, date)
+    if data is not None:
+        quality = data.get("report_quality") or validate_report_state({**data, "trade_date": data.get("trade_date", date)})
+        payload = {key: data.get(key, "") for key, _ in _REPORT_FIELDS}
+        payload["report_quality"] = quality
+        payload["action_summary"] = _report_summary(ticker, date, data)
+        return payload
 
     raise HTTPException(status_code=404, detail="Report not found")
 
@@ -417,6 +490,12 @@ async def asx_feed(limit: int = 100, kind: str = "all", universe_only: bool = Fa
         r["sector_weak"] = bool(m) and (m.get("sector_corr") or 0) < MIN_CORR
     return {"items": out, "grouped": group, "session_date": resolved,
             "ticker": ticker.strip().upper() if ticker else None}
+
+
+@app.get("/api/asx/memory/{ticker}")
+async def asx_ticker_memory(ticker: str):
+    from tradingagents.ticker_memory import inspect
+    return await asyncio.to_thread(inspect, ticker)
 
 
 @app.get("/api/asx/health")
@@ -947,6 +1026,25 @@ async def swing_sync():
     return await loop.run_in_executor(_executor, sync_all)
 
 
+@app.get("/recommendations", response_class=HTMLResponse)
+async def recommendations_page():
+    html = (Path(__file__).parent / "static" / "recommendations.html").read_text()
+    return HTMLResponse(html)
+
+
+@app.get("/api/recommendations/latest")
+async def recommendations_latest(trade_date: str | None = None):
+    from tradingagents.recommendations import get_run
+    return get_run(trade_date)
+
+
+@app.post("/api/recommendations/generate")
+async def recommendations_generate(force: bool = False):
+    from tradingagents.recommendations import generate_and_resolve
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_recommendations_executor, generate_and_resolve, None, force)
+
+
 @app.get("/backtest", response_class=HTMLResponse)
 async def backtest_page():
     html = (Path(__file__).parent / "static" / "backtest.html").read_text()
@@ -1039,6 +1137,11 @@ async def scanner_page():
     return HTMLResponse((static_dir / "scanner.html").read_text())
 
 
+@app.get("/setups", response_class=HTMLResponse)
+async def setups_page():
+    return HTMLResponse((static_dir / "setups.html").read_text())
+
+
 @app.get("/watchlist", response_class=HTMLResponse)
 async def watchlist_page():
     return HTMLResponse((static_dir / "watchlist.html").read_text())
@@ -1104,6 +1207,12 @@ async def watchlist_quote(ticker: str):
 _scan_lock = asyncio.Lock()
 
 
+@app.get("/api/scanner/latest")
+async def scanner_latest():
+    from tradingagents.scanner_snapshot import latest
+    return await asyncio.get_running_loop().run_in_executor(_executor, latest)
+
+
 @app.get("/api/scanner/scan")
 async def scanner_scan(force: bool = False):
     """One scan at a time, process-wide.
@@ -1128,6 +1237,10 @@ async def scanner_scan(force: bool = False):
             return {**_scan_cache["data"], "cached": True}
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(_executor, scan)
+        from tradingagents.scanner_snapshot import save
+        saved = await loop.run_in_executor(_executor, save, data)
+        if not saved:
+            raise HTTPException(status_code=503, detail="Scan returned no market data. Previous saved result retained.")
         # Never cache a fetch that read nothing. "No movers" and "the download
         # failed" both come back as zero rows, and caching the latter pins an
         # empty table on the page for the whole TTL.
@@ -1137,11 +1250,6 @@ async def scanner_scan(force: bool = False):
 
 
 class MomentumOpenRequest(BaseModel):
-@app.get("/setups", response_class=HTMLResponse)
-async def setups_page():
-    return HTMLResponse((static_dir / "setups.html").read_text())
-
-
     ticker: str
     entry_price: float
     dollars: float = 5000.0
@@ -1210,6 +1318,72 @@ async def eod_scan(threshold: float = 6.0, limit: int = 500, store: bool = False
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, lambda: scan(
         universe_limit=limit, threshold=threshold, store=store))
+
+
+# ---------------------------------------------------------------------------
+# /setups -- end-of-day technical setup scanner (tradingagents/ta_setups.py)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/setups/scan")
+async def setups_scan(limit: int = 300, store: bool = False, force: bool = False):
+    """Detect setups on today's provisional bar. `store=true` is what the
+    15:40 timer calls; the page only ever reads the stored run."""
+    from tradingagents.ta_setups import scan
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: scan(
+        limit=limit, store=store, force=force))
+
+
+@app.get("/api/setups/latest")
+async def setups_latest(scan_date: str | None = None):
+    from tradingagents.ta_setups import latest_stored
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: latest_stored(scan_date))
+
+
+@app.post("/api/setups/resolve")
+async def setups_resolve(days_back: int = 40):
+    from tradingagents.ta_setups import resolve
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: resolve(days_back=days_back))
+
+
+@app.get("/api/setups/scorecard")
+async def setups_scorecard():
+    from tradingagents.ta_setups import scorecard
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, scorecard)
+
+
+@app.get("/api/setups/history")
+async def setups_history(days: int = 30, setup_id: str | None = None):
+    from tradingagents.ta_setups import history
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: history(days=days, setup_id=setup_id))
+
+
+@app.get("/api/setups/catalogue")
+async def setups_catalogue():
+    from tradingagents.ta_setups import catalogue
+    return catalogue()
+
+
+@app.post("/api/setups/backfill")
+async def setups_backfill(period: str = "3y", limit: int = 300, run_gates: bool = True):
+    """One-off historical baseline. Minutes, not seconds: runs on the
+    single-worker executor so it cannot crowd the scheduled scans."""
+    from tradingagents.ta_setups import backfill
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_recommendations_executor, lambda: backfill(
+        period=period, limit=limit, store=True, run_gates=run_gates))
+
+
+@app.get("/api/eod/latest")
+async def eod_latest(scan_date: str | None = None):
+    """Return the frozen scheduled EOD scan without re-fetching 500 tickers."""
+    from tradingagents.eod_volume import latest_stored_scan
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, latest_stored_scan, scan_date)
 
 
 @app.post("/api/eod/resolve")
@@ -1320,72 +1494,6 @@ async def scanner_finalize():
     close), but also callable by hand -- running it mid-session just
     re-stamps "last traded so far" harmlessly."""
     from tradingagents.mover_log import finalize_today
-# ---------------------------------------------------------------------------
-# /setups -- end-of-day technical setup scanner (tradingagents/ta_setups.py)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/setups/scan")
-async def setups_scan(limit: int = 300, store: bool = False, force: bool = False):
-    """Detect setups on today's provisional bar. `store=true` is what the
-    15:40 timer calls; the page only ever reads the stored run."""
-    from tradingagents.ta_setups import scan
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, lambda: scan(
-        limit=limit, store=store, force=force))
-
-
-@app.get("/api/setups/latest")
-async def setups_latest(scan_date: str | None = None):
-    from tradingagents.ta_setups import latest_stored
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, lambda: latest_stored(scan_date))
-
-
-@app.post("/api/setups/resolve")
-async def setups_resolve(days_back: int = 40):
-    from tradingagents.ta_setups import resolve
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, lambda: resolve(days_back=days_back))
-
-
-@app.get("/api/setups/scorecard")
-async def setups_scorecard():
-    from tradingagents.ta_setups import scorecard
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, scorecard)
-
-
-@app.get("/api/setups/history")
-async def setups_history(days: int = 30, setup_id: str | None = None):
-    from tradingagents.ta_setups import history
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, lambda: history(days=days, setup_id=setup_id))
-
-
-@app.get("/api/setups/catalogue")
-async def setups_catalogue():
-    from tradingagents.ta_setups import catalogue
-    return catalogue()
-
-
-@app.post("/api/setups/backfill")
-async def setups_backfill(period: str = "3y", limit: int = 300, run_gates: bool = True):
-    """One-off historical baseline. Minutes, not seconds: runs on the
-    single-worker executor so it cannot crowd the scheduled scans."""
-    from tradingagents.ta_setups import backfill
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_recommendations_executor, lambda: backfill(
-        period=period, limit=limit, store=True, run_gates=run_gates))
-
-
-@app.get("/api/eod/latest")
-async def eod_latest(scan_date: str | None = None):
-    """Return the frozen scheduled EOD scan without re-fetching 500 tickers."""
-    from tradingagents.eod_volume import latest_stored_scan
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, latest_stored_scan, scan_date)
-
-
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, finalize_today)
 

@@ -137,12 +137,13 @@
     <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
     <a href="/performance">Performance</a>
     <a href="/asx">ASX</a>
+    <a href="/recommendations">Morning Picks</a>
     <a href="/research" class="active">Patterns</a>
     <a href="/swing">Swing</a>
     <a href="/backtest">Backtest</a>
     <a href="/scanner">Scanner</a>
-    <a href="/watchlist">Watchlist</a>
     <a href="/setups">TechA</a>
+    <a href="/watchlist">Watchlist</a>
     <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
   </nav>
   <div class="nav-right">
@@ -256,6 +257,7 @@
 
   <section>
     <h2>Classifier Information Coefficient</h2>
+    <p class="note">Forward evaluation uses the first document-backed score and the first session open after that score was available. Returns start at that open. Earlier scores without document evidence are excluded.</p>
     <p class="note" style="margin-bottom:10px">
       Each day, the scored names are ranked by AI score and ranked again by the return they
       actually delivered; the correlation between those two orderings is that day's IC. Computing it

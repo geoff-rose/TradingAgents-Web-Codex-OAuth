@@ -101,7 +101,13 @@ def _close(data, symbol: str):
     try:
         s = data[symbol]["Close"].dropna()
     except (KeyError, TypeError):
-        return None
+        # yfinance returns a MultiIndex for a multi-symbol request but a flat
+        # frame for a one-symbol retry. Supporting both is important because
+        # Yahoo can omit one index from an otherwise successful batch.
+        try:
+            s = data["Close"].dropna()
+        except (KeyError, TypeError):
+            return None
     return s if len(s) > 20 else None
 
 
@@ -128,22 +134,40 @@ def board() -> dict[str, Any]:
 
     symbols = [MARKET_INDEX] + list(SECTOR_INDICES)
     data = _download(symbols, period="3mo")
-    rows, as_of = [], None
+    fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rows, dates = [], []
     for sym in symbols:
         label = "ASX 200" if sym == MARKET_INDEX else SECTOR_INDICES[sym]
         s = _close(data, sym)
+        if s is None:
+            # A partial Yahoo batch must not leave a visible sector tile blank
+            # when the individual quote is available. This is especially
+            # relevant for thinner sub-indices such as Gold and All Technology.
+            try:
+                s = _close(_download([sym], period="3mo"), sym)
+            except Exception as exc:
+                logger.warning("sector retry failed for %s: %s", sym, exc)
         entry = {"symbol": sym, "label": label, "is_market": sym == MARKET_INDEX,
-                 "last": None, "day_pct": None, "week_pct": None, "month_pct": None}
+                 "last": None, "day_pct": None, "week_pct": None, "month_pct": None,
+                 "as_of": None, "source": "yahoo", "fetched_at": fetched_at}
         if s is not None and len(s) >= 2:
             last = float(s.iloc[-1])
+            entry["as_of"] = str(s.index[-1].date())
+            dates.append(entry["as_of"])
             entry["last"] = last
             entry["day_pct"] = (last / float(s.iloc[-2]) - 1) * 100
             if len(s) > 5:
                 entry["week_pct"] = (last / float(s.iloc[-6]) - 1) * 100
             if len(s) > 21:
                 entry["month_pct"] = (last / float(s.iloc[-22]) - 1) * 100
-            as_of = as_of or str(s.index[-1].date())
         rows.append(entry)
+
+    # Do not let the first successful ticker hide a lagging sector bar. The
+    # latest completed daily session is the board date, while each tile keeps
+    # its own date so an incomplete/stale response is visible.
+    as_of = max(dates) if dates else None
+    for row in rows:
+        row["stale"] = bool(row["as_of"] and as_of and row["as_of"] != as_of)
 
     market_day = next((r["day_pct"] for r in rows if r["is_market"]), None)
     for r in rows:
@@ -154,7 +178,8 @@ def board() -> dict[str, Any]:
     sectors.sort(key=lambda r: (r["day_pct"] is None, -(r["day_pct"] or 0)))
     out = {"as_of": as_of, "market": next(r for r in rows if r["is_market"]),
            "sectors": sectors, "fetched_at": datetime.now(timezone.utc).isoformat(
-               timespec="seconds")}
+               timespec="seconds"),
+           "stale_symbols": [r["symbol"] for r in rows if r["stale"]]}
     _board_cache.update(ts=now, data=out)
     return out
 

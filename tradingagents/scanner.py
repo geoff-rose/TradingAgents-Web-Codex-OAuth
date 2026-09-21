@@ -22,15 +22,11 @@ Rows are **flagged, never suppressed**. `cost_verdict` says whether the
 historical edge for that price band survived its spread, so a 3c rocket still
 appears and is plainly marked as uneconomic.
 
-**Volume comparison is time-of-day aware.** Comparing today's partial volume
-against a full-day median would call every stock quiet at 10:30am. Expected
-volume is scaled by the fraction of the session elapsed. That is a linear
-approximation of an intraday volume curve that is really U-shaped (heavy at
-open and close), so early-session ratios are overstated and late-session ones
-understated — `volume_ratio_note` carries that caveat into the UI rather than
-leaving it implicit.
+**Volume comparison is time-of-day aware.** Completed hourly windows are
+compared with matching hours over up to 20 previous sessions, with a minimum
+of 10. Outside trading, full-day volume uses a 50-session median.
 
-Data: yfinance daily bars with `period='5d'`, whose current-day row updates
+Data: yfinance daily bars with `period='3mo'`, whose current-day row updates
 intraday (delayed ~20 min for ASX). Delay is fine for a multi-day hold — the
 measured effect plays out over 3-10 days, not seconds — and it avoids needing
 a live market-data subscription on the IBKR gateway.
@@ -39,6 +35,8 @@ a live market-data subscription on the IBKR gateway.
 from __future__ import annotations
 
 import sqlite3
+import logging
+from zoneinfo import ZoneInfo
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
@@ -58,12 +56,11 @@ MIN_MOVE_PCT = 8.0
 MIN_VOLUME_RATIO = 3.0
 WATCH_MOVE_PCT = 5.0          # shown as "watch", below the measured effect
 VOLUME_LOOKBACK_DAYS = 50
-ANNOUNCEMENT_LOOKBACK_HOURS = 36
 
 # ASX continuous trading, Sydney time.
 SESSION_OPEN = time(10, 0)
 SESSION_CLOSE = time(16, 0)
-SYDNEY_UTC_OFFSET_HOURS = 10  # AEST; AEDT is +11 -- see session_fraction()
+SYDNEY = ZoneInfo("Australia/Sydney")
 
 TRADEABLE_BANDS = [
     (0.00, 0.05, "under 5c", "cost > edge (round trip ~10%)"),
@@ -82,25 +79,12 @@ def price_band(price: float) -> tuple[str, str]:
 
 
 def session_state(now_utc: datetime | None = None) -> tuple[str, float]:
-    """Returns (state, effective_fraction) where state is 'open', 'pre-open',
-    'closed' or 'weekend', and effective_fraction is the divisor for the
-    expected-volume calculation.
+    """Return session state and elapsed fraction using Sydney daylight saving.
 
-    **The distinction that matters**: while the session is OPEN the latest
-    daily bar is partial, so expected volume must be scaled by how much of
-    the session has elapsed. Outside the session the latest bar is a
-    COMPLETE day, so the divisor is 1.0. An earlier version scaled by the
-    elapsed fraction unconditionally with a 0.05 floor, which off-session
-    produced ~20x inflated volume ratios (a normal Friday read as 108x) --
-    the kind of number that looks like a signal and is arithmetic.
-
-    Uses a fixed +10 offset (AEST). During daylight saving (AEDT, +11) the
-    boundaries are an hour out, which only shifts ratios near the open and
-    close; documented rather than pulling in a tz database for a scanner
-    whose thresholds are already coarse.
+    The fraction is retained for display; it does not scale relative volume.
     """
     now = now_utc or datetime.now(timezone.utc)
-    syd = now + timedelta(hours=SYDNEY_UTC_OFFSET_HOURS)
+    syd = now.astimezone(SYDNEY)
     if syd.weekday() >= 5:
         return "weekend", 1.0
     t_ = syd.time()
@@ -126,14 +110,12 @@ def todays_announcements(db_path: str = ASX_DB) -> dict[str, list[dict[str, Any]
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
         conn.row_factory = sqlite3.Row
-        # 36h, not 24h. The announcements that drive a gap are typically
-        # released AFTER the previous close or before the open, so a 24h
-        # window anchored on "now" drops exactly the ones that explain
-        # today's move -- and misses the whole prior session entirely when
-        # the scan runs late in the day. 36h covers overnight plus the full
-        # current session in every case; over-inclusion is harmless because
-        # each row carries its own release timestamp.
-        since = (datetime.now(timezone.utc) - timedelta(hours=ANNOUNCEMENT_LOOKBACK_HOURS)).isoformat()
+        # Include releases since the previous weekday close, across weekends.
+        now = datetime.now(SYDNEY)
+        prior = now.date() - timedelta(days=1)
+        while prior.weekday() >= 5:
+            prior -= timedelta(days=1)
+        since = datetime.combine(prior, SESSION_CLOSE, SYDNEY).astimezone(timezone.utc).isoformat()
         rows = conn.execute(
             "SELECT fingerprint, ticker, headline, released_at, price_sensitive, is_halt, url "
             "FROM announcements WHERE COALESCE(released_at, seen_at) >= ? "
@@ -153,6 +135,10 @@ def todays_announcements(db_path: str = ASX_DB) -> dict[str, list[dict[str, Any]
         sig = scores.get(a["fingerprint"]) or {}
         a["ai_signal"] = sig.get("signal")
         a["ai_score"] = sig.get("score")
+        a["reason"] = sig.get("reason")
+        a["ai_classified_at"] = sig.get("classified_at")
+        a["ai_model"] = sig.get("model")
+        a["ai_prompt_version"] = sig.get("prompt_version")
         out.setdefault(a["ticker"], []).append(a)
     return out
 
@@ -164,10 +150,8 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
     by_ticker = {c.ticker: c for c in cands}
     tickers = list(by_ticker)
     state, frac = session_state()
-    # The Sydney session date the scan is being run FOR, to compare each bar
-    # against. Same fixed +10 the rest of this module uses.
-    session_day = (datetime.now(timezone.utc)
-                   + timedelta(hours=SYDNEY_UTC_OFFSET_HOURS)).date().isoformat()
+    # Compare each bar against the current Sydney date.
+    session_day = datetime.now(SYDNEY).date().isoformat()
     anns = todays_announcements()
     try:
         from tradingagents.asx_signals import get_ticker_signals
@@ -180,7 +164,7 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
     for i in range(0, len(tickers), batch):
         chunk = tickers[i:i + batch]
         with YF_LOCK:
-            data = yf.download([f"{t}.AX" for t in chunk], period="5d", interval="1d",
+            data = yf.download([f"{t}.AX" for t in chunk], period="3mo", interval="1d",
                                group_by="ticker", auto_adjust=False, threads=True, progress=False)
         for t in chunk:
             try:
@@ -217,12 +201,10 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
             # measured live instead of after the close.
             open_px = float(today["Open"])
             move_from_open_pct = ((last - open_px) / open_px * 100) if open_px else None
-            median_vol = float(df["Volume"].iloc[:-1].median() or 0)
-            # Longer-baseline median would be better; 5d is what this cheap
-            # call returns. Documented rather than silently used as if it were
-            # the 50-day figure the backtest used.
-            expected = median_vol * frac
-            vol_ratio = (float(today["Volume"]) / expected) if expected else np.nan
+            median_vol = float(df["Volume"].iloc[:-1].tail(VOLUME_LOOKBACK_DAYS).median() or 0)
+            expected = median_vol
+            vol_ratio = ((float(today["Volume"]) / expected)
+                         if expected and state != "open" else np.nan)
             band, verdict = price_band(last)
             ticker_anns = anns.get(t, [])
             # **Never max() over a ticker's announcements.** 34% of scored
@@ -235,8 +217,15 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
             # fall back to the MOST MATERIAL individual score (furthest from
             # 50), never the highest.
             net = ticker_signals.get(t)
+            if net and not set((net.get("fingerprints") or "").split(",")).issubset(
+                    {a["fingerprint"] for a in ticker_anns}):
+                net = None
+            from .asx_signals import _worth_a_call
+            pending_documents = any(_worth_a_call(a) and a.get("ai_score") is None for a in ticker_anns)
             best = max((a for a in ticker_anns if a.get("ai_score") is not None),
                        key=lambda a: abs(a["ai_score"] - 50), default=None)
+            if pending_documents:
+                net, best = None, None
 
             rows.append({
                 "ticker": t, "company": by_ticker[t].company,
@@ -260,6 +249,10 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
                 "ai_signal": (net["signal"] if net else (best["ai_signal"] if best else None)),
                 "ai_score": (net["score"] if net else (best["ai_score"] if best else None)),
                 "ai_is_net": bool(net),
+                "ai_scored_at": net["computed_at"] if net else (best.get("ai_classified_at") if best else None),
+                "ai_model": net["model"] if net else (best.get("ai_model") if best else None),
+                "ai_prompt_version": net["prompt_version"] if net else (best.get("ai_prompt_version") if best else None),
+                "evidence_status": "awaiting_documents" if pending_documents else "document_read",
                 "ai_reason": (net["reason"] if net else (best.get("reason") if best else None)),
                 "ai_score_range": (
                     [min(a["ai_score"] for a in ticker_anns if a.get("ai_score") is not None),
@@ -270,12 +263,25 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
                 "announcement_at": (best or (ticker_anns[0] if ticker_anns else {})).get("released_at"),
             })
 
+    if state == "open":
+        from .scan_volume import for_tickers
+        try:
+            volumes = for_tickers([r["ticker"] for r in rows if not r["is_stale"]])
+        except Exception:
+            logging.getLogger(__name__).warning("Matched-window volume unavailable", exc_info=True)
+            volumes = {}
+        for r in rows:
+            v = volumes.get(r["ticker"])
+            r["volume_ratio"] = round(v["ratio"], 2) if v else None
+            r["volume_through"] = v["through"] if v else None
+            r["volume_baseline_sessions"] = v["sessions"] if v else None
+
     for r in rows:
         vr = r["volume_ratio"]
         r["meets_move"] = r["move_pct"] >= MIN_MOVE_PCT
         r["meets_volume"] = bool(vr is not None and vr >= MIN_VOLUME_RATIO)
         r["has_news"] = r["n_announcements"] > 0
-        r["full_setup"] = bool(r["meets_move"] and r["meets_volume"] and r["has_news"])
+        r["full_setup"] = bool(not r["is_stale"] and r["meets_move"] and r["meets_volume"] and r["has_news"])
     rows.sort(key=lambda r: (r["full_setup"], r["meets_move"] and r["meets_volume"],
                              r["move_pct"]), reverse=True)
 
@@ -288,7 +294,7 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
         for day in sorted({r["bar_date"] for r in rows}):
             log_movers([r for r in rows if r["bar_date"] == day], as_of=day)
     except Exception:
-        pass  # logging must never break the scan the user is looking at
+        logging.getLogger(__name__).exception("Mover observation logging failed")
 
     n_stale = sum(1 for r in rows if r["is_stale"])
     return {
@@ -307,9 +313,9 @@ def scan(limit: int = 500, batch: int = 60) -> dict[str, Any]:
         "thresholds": {"min_move_pct": MIN_MOVE_PCT, "min_volume_ratio": MIN_VOLUME_RATIO,
                        "watch_move_pct": WATCH_MOVE_PCT},
         "volume_ratio_note": (
-            "Today's volume vs a 5-day median scaled by fraction of session elapsed. "
-            "Real intraday volume is U-shaped (heavy at open and close), so early-session "
-            "ratios read HIGH and late-session ratios read LOW. Treat as indicative."),
+            "During trading: completed hourly volume vs matching hours over up to 20 prior sessions "
+            "(minimum 10), allowing for delayed data. Blank until a comparable window is available. "
+            "Outside trading: full-day volume vs the previous 50-session median."),
         "price_note": (
             "Quotes are yfinance daily bars updating intraday, ~20 min delayed. Fine for a "
             "3-10 day hold, not for precise entry timing."),

@@ -192,12 +192,13 @@
     <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
     <a href="/performance">Performance</a>
     <a href="/asx">ASX</a>
+    <a href="/recommendations">Morning Picks</a>
     <a href="/research">Patterns</a>
     <a href="/swing">Swing</a>
     <a href="/backtest">Backtest</a>
     <a href="/scanner" class="active">Scanner</a>
-    <a href="/watchlist">Watchlist</a>
     <a href="/setups">TechA</a>
+    <a href="/watchlist">Watchlist</a>
     <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
   </nav>
   <div class="nav-right">
@@ -234,14 +235,15 @@
   </div>
 
   <div class="bar">
-    <button class="btn2" id="refresh">Refresh scan</button>
+    <button class="btn2" id="refresh">Run fresh scan</button>
     <span id="meta" class="note"></span>
   </div>
 
   <div class="card">
     <h2>End-of-day volume — overnight hold candidates</h2>
     <p class="note" style="margin-bottom:10px">
-      Names trading well above their normal volume for this point in the session. Measured over
+      Names trading well above their normal volume for this point in the session, with a separate
+      catalyst lane for strong verified announcements. Measured over
       2 years of hourly bars on the top 500: buying the closing auction and selling the next
       <strong>opening</strong> auction returned <strong>~+0.19%</strong> per night unconditionally,
       and <strong>~+0.34%</strong> when the stock ran &gt;6x normal volume — 8 of 9 quarters
@@ -253,20 +255,28 @@
       The ratio compares today's volume so far against the <em>same hours</em> of the previous 20
       sessions, so it means the same thing whenever you look — but only after 15:00 is it the
       statistic the strategy was actually measured on. Before then it is a live preview.
+      The scheduled scan runs at <strong>15:45 Sydney</strong> and that candidate list is frozen;
+      refreshing this page displays the stored result rather than recalculating it.
+      Verified same-session scores of 75+ and prior-session scores of 80+ are used as
+      secondary ranking evidence only; they no longer bypass the measured 6x volume gate.
+      Those rows are marked as catalyst candidates. The price column is a Yahoo 15-minute
+      snapshot at the 15:45 Sydney scan, not the later closing-auction price.
+      Candidates also need at least <strong>$500k median daily turnover</strong> over the prior
+      20 sessions; price remains visible as a tick-cost warning rather than the liquidity gate.
       <strong>+0.34% per night is small</strong>: a daily round trip has to cost less than that,
       and ~21% of these historically do not move overnight at all.
     </p>
     <div class="bar">
-      <button class="btn2 ghost" id="eod-refresh">Run scan</button>
+      <button class="btn2 ghost" id="eod-refresh">Run live preview</button>
       <span class="note" id="eod-meta"></span>
     </div>
     <div style="overflow-x:auto">
       <table>
         <thead><tr>
           <th>Ticker</th><th>Company</th><th class="num">Vol x</th>
-          <th class="num">Last</th><th class="num">Move %</th><th class="actions"></th>
+          <th class="num" title="Yahoo 15-minute snapshot captured at the scheduled 15:45 Sydney scan">Price @ 15:45</th><th class="num">Move %</th><th class="num">Median $ turnover</th><th>Why</th><th class="actions"></th>
         </tr></thead>
-        <tbody id="eod-body"><tr><td colspan="6" class="note">Not run yet.</td></tr></tbody>
+        <tbody id="eod-body"><tr><td colspan="8" class="note">Loading stored result…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -361,6 +371,7 @@
   <label>Source</label>
   <select id="dlg-source" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:13px;width:100%">
     <option value="scanner">Scanner (mover)</option>
+    <option value="eod-volume">EOD volume (overnight)</option>
     <option value="announcement">Announcement I read</option>
     <option value="other">Other</option>
   </select>
@@ -376,6 +387,9 @@
 <script>
 const $ = s => document.querySelector(s);
 const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(d);
+const fmtAud = v => (v === null || v === undefined || Number.isNaN(v)) ? '—'
+  : (Number(v) >= 1000000 ? '$' + (Number(v) / 1000000).toFixed(1) + 'm'
+     : '$' + Math.round(Number(v) / 1000) + 'k');
 // ASX trades in Sydney time; every timestamp from the API is UTC. Convert at
 // the point of display rather than storing local time anywhere, so DST
 // (AEST/AEDT) is handled by the browser's own tz database instead of a fixed
@@ -394,10 +408,22 @@ const cls = v => v > 0 ? 'pos' : (v < 0 ? 'neg' : '');
 let currentSetup = null;
 
 async function loadScan(force) {
-  $('#movers-body').innerHTML = '<tr><td colspan="13" class="note">Scanning…</td></tr>';
-  const r = await fetch('/api/scanner/scan' + (force ? '?force=true' : ''));
-  if (!r.ok) { $('#movers-body').innerHTML = '<tr><td colspan="13" class="note">Scan failed.</td></tr>'; return; }
-  const d = await r.json();
+  $('#refresh').disabled = true;
+  let d;
+  try {
+    const r = await fetch(force ? '/api/scanner/scan?force=true' : '/api/scanner/latest');
+    if (!r.ok) throw new Error('Scan unavailable');
+    d = await r.json();
+  } catch (e) {
+    $('#meta').textContent = 'Could not refresh movers. Any displayed result is from the previous successful load.';
+    return;
+  } finally {
+    $('#refresh').disabled = false;
+  }
+  if (d.available === false) {
+    $('#movers-body').innerHTML = '<tr><td colspan="13" class="note">No saved scan yet. Waiting for the scheduled scan, or select Run fresh scan.</td></tr>';
+    return;
+  }
   // Name the session the BARS are from, not just when the scan ran. A scan at
   // 10:20 showing yesterday's bars is the failure mode this line exists to
   // make visible rather than letting a stale +12% pass as live.
@@ -409,7 +435,8 @@ async function loadScan(force) {
     ? ` · ⚠ ${d.n_stale} row${d.n_stale > 1 ? 's' : ''} still on ${staleDates} — today's bar not published yet`
     : (bars && bars !== d.session_day ? ` · bars from ${bars}` : '');
   $('#meta').innerHTML = `${d.n_rows} movers · session ${d.session_state} · scanned ${fmtSydney(d.scanned_at)} Sydney`
-    + (d.cached ? ' (cached)' : '') + staleWarn;
+    + (d.cached ? ' (saved result)' : '') + staleWarn
+    + ' · Updated every 10 minutes on the weekday schedule; retained between runs.';
   $('#scan-notes').innerHTML = `<strong>Volume:</strong> ${d.volume_ratio_note}<br><strong>Prices:</strong> ${d.price_note}`;
   moverRows = d.rows || [];
   renderMovers();
@@ -935,36 +962,82 @@ fetch('/api/auth/status').then(r => r.json()).then(a => {
   });
 }).catch(() => {});
 
-async function loadEod() {
-  $('#eod-body').innerHTML = '<tr><td colspan="6" class="note">Scanning…</td></tr>';
-  // store=false: looking at the page must not write into the forward record.
-  // Only the 15:45 timer stores, so the live track record stays one row per
-  // session rather than one per time anybody opened the page.
-  const r = await fetch('/api/eod/scan?store=false');
-  if (!r.ok) { $('#eod-body').innerHTML = '<tr><td colspan="6" class="note">Scan failed.</td></tr>'; return; }
+async function loadEod(livePreview = false) {
+  $('#eod-body').innerHTML = `<tr><td colspan="8" class="note">${livePreview ? 'Scanning live preview…' : 'Loading stored result…'}</td></tr>`;
+  // Normal page loads are instant database reads. Only an explicit button
+  // press performs the expensive 500-name preview, and store=false guarantees
+  // that preview cannot replace the scheduled 15:45 forward record.
+  const r = await fetch(livePreview ? '/api/eod/scan?store=false' : '/api/eod/latest');
+  if (!r.ok) { $('#eod-body').innerHTML = '<tr><td colspan="8" class="note">Could not load the EOD scan.</td></tr>'; return; }
   const d = await r.json();
-  $('#eod-meta').innerHTML = `${d.n_candidates} above ${d.threshold}x · ${d.n_with_data} of `
-    + `${d.n_universe} with data · ${d.sydney_time} Sydney`
+  if (!d.available) {
+    $('#eod-meta').innerHTML = 'No stored EOD scan yet · use “Run live preview” before 15:45 Sydney.';
+    $('#eod-body').innerHTML = '<tr><td colspan="8" class="note">No stored result yet.</td></tr>';
+    return;
+  }
+  const coverage = d.n_with_data != null && d.n_universe != null
+    ? ` · ${d.n_with_data} of ${d.n_universe} with data` : '';
+  const source = d.stored
+    ? ' · <span class="pill ok">stored scheduled result</span>'
+    : ' · <span class="pill warn">live preview — not stored</span>';
+  const stale = d.is_current === false
+    ? ' · <span class="pill warn">latest stored session</span>' : '';
+  const volumeN = d.n_volume_candidates ?? d.n_candidates;
+  const catalystN = d.n_catalyst_candidates || 0;
+  $('#eod-meta').innerHTML = `${volumeN} volume candidates${catalystN ? ` + ${catalystN} catalyst` : ''}${coverage} · median turnover ≥ ${fmtAud(d.min_median_turnover_aud || 500000)} · `
+    + `${d.scan_date} ${d.sydney_time} Sydney${source}${stale}`
     + (d.window_complete
         ? ' · <span class="pill ok">full window</span>'
         : ' · <span class="pill warn" title="Before 15:00 the ratio is computed on fewer hours than the strategy was measured on. Directionally useful, but a different statistic.">preview — window not complete</span>');
   const rows = d.candidates || [];
-  if (!rows.length) { $('#eod-body').innerHTML = '<tr><td colspan="6" class="note">Nothing above the threshold.</td></tr>'; return; }
-  $('#eod-body').innerHTML = rows.map(c => `<tr>
+  if (!rows.length) { $('#eod-body').innerHTML = '<tr><td colspan="8" class="note">Nothing qualified.</td></tr>'; return; }
+  $('#eod-body').innerHTML = rows.map(c => {
+    const snapPrice = c.price_1545 != null ? c.price_1545 : c.price;
+    const snapTitle = c.price_1545_at
+      ? `Snapshot ${c.price_1545_at} (${c.price_1545_source || 'source not recorded'})`
+      : 'Legacy row: original hourly Last value';
+    return `<tr>
     <td><strong>${c.ticker}</strong></td>
     <td class="hl">${c.company || '—'}</td>
     <td class="num"><strong>${fmt(c.vol_ratio, 1)}x</strong></td>
-    <td class="num">${fmt(c.price, 3)}</td>
+    <td class="num" title="${snapTitle}">${fmt(snapPrice, 3)}</td>
     <td class="num ${cls(c.move_pct)}">${c.move_pct != null ? fmt(c.move_pct) : '—'}</td>
-    <td class="actions"><button class="btn2 ghost" data-eodwatch="${c.ticker}">+ Watch</button></td>
-  </tr>`).join('');
+    <td class="num">${fmtAud(c.median_turnover_aud)}</td>
+    <td>${c.catalyst_lane ? `<span class="pill ok" title="${c.announcement_headline || ''}">${c.catalyst_lane === 'same_day' ? 'same-day catalyst' : 'prior-session catalyst'}${c.announcement_score != null ? ` ${c.announcement_score}` : ''}</span>` : '<span class="note">volume</span>'}</td>
+    <td class="actions">
+      <button class="btn2" data-eodtrade="${c.ticker}">Paper trade</button>
+      <button class="btn2 ghost" data-eodwatch="${c.ticker}">+ Watch</button>
+    </td>
+  </tr>`;
+  }).join('');
+  document.querySelectorAll('[data-eodtrade]').forEach(b => b.onclick = () => {
+    const row = rows.find(x => x.ticker === b.dataset.eodtrade) || {};
+    const price = row.price_1545 != null ? row.price_1545 : row.price;
+    const snapshot = row.price_1545_at
+      ? `snapshot ${fmtSydney(row.price_1545_at)} Sydney`
+      : 'stored scan price';
+    currentSetup = Object.assign({}, row, {
+      eod_scan_date: d.scan_date,
+      eod_snapshot_at: row.price_1545_at || null,
+      eod_snapshot_source: row.price_1545_source || null,
+    });
+    $('#dlg-sub').textContent = `${b.dataset.eodtrade} — EOD volume candidate · ${snapshot} · intended exit: next open`;
+    $('#dlg-ticker').value = b.dataset.eodtrade;
+    $('#dlg-price').value = price != null ? price : '';
+    $('#dlg-source').value = 'eod-volume';
+    $('#dlg-ai').value = row.announcement_score != null ? row.announcement_score : '';
+    $('#dlg-conv').value = '';
+    $('#dlg-note').value = `EOD volume overnight candidate from ${d.scan_date}; exit at next open.`;
+    $('#dlg-hold').value = 1;
+    $('#trade-dialog').showModal();
+  });
   document.querySelectorAll('[data-eodwatch]').forEach(b => b.onclick = () => {
     const row = rows.find(x => x.ticker === b.dataset.eodwatch) || {};
     addToWatchlist(b, { ticker: b.dataset.eodwatch, company: row.company || null,
-                        source: 'eod-volume', ai_score: null });
+                        source: 'eod-volume', ai_score: row.announcement_score || null });
   });
 }
-$('#eod-refresh').onclick = loadEod;
+$('#eod-refresh').onclick = () => loadEod(true);
 
 document.querySelectorAll('.seg2[data-setup]').forEach(b => b.onclick = () => {
   outcomesSetup = b.dataset.setup;
@@ -989,14 +1062,14 @@ $('#cal-next').onclick = () => shiftMonth(1);
 $('#cal-reset').onclick = () => selectDay(null);
 
 loadScan(false);
+// This is a fast database read of the frozen 15:45 result. A live 500-name
+// recalculation happens only when the user explicitly requests a preview.
+loadEod(false);
 // loadCalendar picks the initial day (today) and loads it; calling
 // loadOutcomes here too would fetch the rolling window and immediately
 // discard it.
 loadCalendar();
-// 10 minutes, matching the server cache TTL and asx-scanner-refresh.timer's
-// cadence (see the skill doc) -- the background timer keeps the cache warm
-// regardless of whether this page is open, so polling faster than the TTL
-// would just re-fetch the same cached response for no benefit.
+// Read the saved result; only the scheduler or explicit button runs a scan.
 setInterval(() => loadScan(false), 600000);
 // Keep the day selection across the auto-refresh -- a background reload that
 // silently snapped the table back to the 30-day window would be worse than

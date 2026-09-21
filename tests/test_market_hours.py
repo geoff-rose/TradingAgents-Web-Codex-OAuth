@@ -10,7 +10,8 @@ import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-sys.path.insert(0, "/opt/tradingagents")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tradingagents.market_hours import is_open
 
 UTC = ZoneInfo("UTC")

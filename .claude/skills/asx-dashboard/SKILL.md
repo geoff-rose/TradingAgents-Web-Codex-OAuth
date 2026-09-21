@@ -5,12 +5,49 @@ description: Architecture, file map, and conventions for the ASX trading dashboa
 
 # ASX Dashboard
 
+## Reliability update — 2026-09-08
+
+The subsequent ticker-memory implementation is described in `docs/ticker-memory.md`.
+It supersedes the 12,000-character document cap: all readable pages feed cached
+section extraction, then sourced prior-fact comparison and v7 scoring. The feed
+has a Facts inspector. History and extraction are bounded and resumable.
+
+Read `docs/dashboard-reliability.md` before relying on the older implementation
+notes below. It supersedes headline fallback scoring, fixed-offset session
+timing, linear intraday volume scaling, mutable mover scores, and standalone
+Swing exit orders. Document provenance is mandatory for current signals;
+prospective score outcomes have their own table. Swing now uses staged paper
+brackets, cumulative fill reconciliation and in-place target updates. The web
+service requires a secret from the protected environment file.
+
 A market dashboard bolted onto the existing TradingAgents FastAPI app (chosen
 over a standalone service to reuse its hosting/port/auth — see the project
 memory for that decision). Everything lives in this repo except the
 announcement/bar data, which comes from a sibling project (asx-collector).
-Three pages so far, same conventions throughout (see below): `/asx`,
-`/research`, and `/swing`.
+The market-facing pages include `/asx`, `/research`, `/swing`, `/backtest`,
+`/scanner`, and `/recommendations`.
+
+## `/recommendations` — weekday pre-open candidate ranking
+
+`tradingagents/recommendations.py` combines the persisted tradeable model
+universe, completed daily OHLCV features, sector/liquidity metrics, current
+and prior-session announcement scores, a liquid top-500 fresh-news pool, and
+the existing futures/commodity/sector snapshot. It runs at 09:50
+Australia/Sydney through
+`asx-recommendations.timer`, about ten minutes before the ASX opening auction.
+Each run is stored in `data/recommendations.db`, with exactly the candidates,
+score components, timestamps, levels, and later next-open 1/3/5/10-session
+outcomes retained. The page is `/recommendations`.
+
+This is a ranked research shortlist, not an order router or a validated
+probability model. Verified document scores outrank a cautious headline-only
+proxy for fresh releases; neutral or negative unscored headlines are not
+forced into the shortlist. The ranker can return one or two candidates when
+only those qualify, and can abstain for a hard market move, stale price
+history, halts, or zero qualified candidates; it must not force three buys on
+a bad day. Existing backtests currently do not
+demonstrate a reliable multi-day timing edge, and that status is stored with
+every run and shown on the page.
 
 ## The whole picture
 
@@ -187,43 +224,6 @@ be the one clicking them.
 don't fold same-day news-driven trading into this one; Swing is specifically
 the multi-day heuristic hold.
 
-## `tradingagents/backtest.py` — heuristic backtest (added 2026-08-21, phase 3)
-
-Built per `/root/asxbrief-phase3-spec-v2.md` §3 — that document's reasoning
-is the source of truth for *why* a backtest exists alongside forward paper
-testing (short version: at ~40-60 trades/year across 5 tickers, forward
-testing alone needs ~5 years to separate real edge from noise; a backtest
-over years of daily history gets that sample size immediately, at the cost
-of needing an honest fill model since it can't observe real depth). Run via
-`.venv/bin/python -m tradingagents.backtest`.
-
-**Point-in-time signal generation, not a call to `swing_signal.evaluate()`**:
-`generate_signals()` re-implements the exact same rule (imports the same
-constants from `swing_signal.py` so there's one source of truth for the
-thresholds) as a day-by-day walk-forward scan, so every day's decision only
-sees data available up to and including that day's close — `evaluate()`
-itself always fetches live/latest data and can't be reused directly for
-historical replay. No-pyramiding is enforced the same way
-`swing_db.has_active_trade` does live.
-
-**Two fill models, always reported side by side**: `naive` (fills on mere
-touch — the number to distrust) and `realistic` (requires trading through
-the level by one tick, approximating worst-case queue position — still an
-approximation given only daily OHLC; minimum-volume-through-level is NOT
-implemented, daily bars don't carry volume-at-price). If naive and realistic
-disagree sharply, that gap is simulation artefact, not edge.
-
-**ASX tick table verified live** (`TICK_TABLE` in this file) against ASX's
-own price-steps page, not assumed — the phase-3 spec explicitly flagged this
-as disputed and decisive. Confirmed: below 10c → 0.1c tick; 10c up to and
-including $2.00 → 0.5c tick; above $2.00 → 1c tick.
-
-**Same-bar target/stop ambiguity**: when a day's range contains both target
-and stop, daily OHLC can't tell which filled first. Resolved via real
-intraday bars (`asxbrief`'s `bars` table) when available, otherwise the
-conservative default (assume stop) — never silently assumes target. As of
-2026-08-21 the current focus tickers have no intraday backfill started at
-all yet, so this will read at or near 100% conservative-default until that
 ## `/setups` — end-of-day technical setup scanner (added 2026-09-21)
 
 `tradingagents/ta_indicators.py` (pure-pandas EMA/RSI-Wilder/MACD/TRIX/
@@ -285,6 +285,43 @@ at t), and scan→resolve→scorecard / backfill→hypothesis on a temp DB. Run 
 `.venv/bin/python -m unittest tests.test_ta_setups` (pytest is not installed
 in the venv).
 
+## `tradingagents/backtest.py` — heuristic backtest (added 2026-08-21, phase 3)
+
+Built per `/root/asxbrief-phase3-spec-v2.md` §3 — that document's reasoning
+is the source of truth for *why* a backtest exists alongside forward paper
+testing (short version: at ~40-60 trades/year across 5 tickers, forward
+testing alone needs ~5 years to separate real edge from noise; a backtest
+over years of daily history gets that sample size immediately, at the cost
+of needing an honest fill model since it can't observe real depth). Run via
+`.venv/bin/python -m tradingagents.backtest`.
+
+**Point-in-time signal generation, not a call to `swing_signal.evaluate()`**:
+`generate_signals()` re-implements the exact same rule (imports the same
+constants from `swing_signal.py` so there's one source of truth for the
+thresholds) as a day-by-day walk-forward scan, so every day's decision only
+sees data available up to and including that day's close — `evaluate()`
+itself always fetches live/latest data and can't be reused directly for
+historical replay. No-pyramiding is enforced the same way
+`swing_db.has_active_trade` does live.
+
+**Two fill models, always reported side by side**: `naive` (fills on mere
+touch — the number to distrust) and `realistic` (requires trading through
+the level by one tick, approximating worst-case queue position — still an
+approximation given only daily OHLC; minimum-volume-through-level is NOT
+implemented, daily bars don't carry volume-at-price). If naive and realistic
+disagree sharply, that gap is simulation artefact, not edge.
+
+**ASX tick table verified live** (`TICK_TABLE` in this file) against ASX's
+own price-steps page, not assumed — the phase-3 spec explicitly flagged this
+as disputed and decisive. Confirmed: below 10c → 0.1c tick; 10c up to and
+including $2.00 → 0.5c tick; above $2.00 → 1c tick.
+
+**Same-bar target/stop ambiguity**: when a day's range contains both target
+and stop, daily OHLC can't tell which filled first. Resolved via real
+intraday bars (`asxbrief`'s `bars` table) when available, otherwise the
+conservative default (assume stop) — never silently assumes target. As of
+2026-08-21 the current focus tickers have no intraday backfill started at
+all yet, so this will read at or near 100% conservative-default until that
 changes.
 
 **First real run's result — a genuine finding, not a bug** (verified by hand
@@ -1934,6 +1971,25 @@ combination (H/M/U/Z, 2017-2026) and the only one that resolves is
 `AP17H.AX`, an expired March-2017 contract frozen at its final settlement
 price — not a live feed. Barchart remains the only viable source.
 
+**Futures panel (ES / NQ / SPI via IB Gateway)** — since 2026-09-07 the
+dashboard has a separate "Futures" section fed by `markets.py::refresh_futures`
+(one gateway session, `FUTURES_CONTRACTS`, delayed data type 4, persisted to
+`data/futures_cache.json`) and hit every 2 min by `asx-futures-refresh.timer`.
+`get_snapshot()` merges the cache in with `group: "futures"` and sets
+`futures_status` — `ok: false` (red "degraded" banner on the page) whenever
+any of ES/NQ/AP*0 is missing or older than 600s. `refresh_spi200` (the daily
+timer) is also IBKR-first now, Barchart only as fallback.
+**Front-contract selection (`_active_front_contract`) has bitten twice at
+the September roll:** (1) 2026-09-17/18 — IBKR returns expired contracts in the
+chain, so plain sorting picked the just-expired APU6 → no last → SPI silently
+absent; fixed by filtering `expiry >= today` (Sydney). (2) 2026-09-18 — SPI
+also lists *serial* months, so "nearest unexpired" became APV6 (October: 33
+contracts traded, `last = -1`) and SPI dropped again; fixed by preferring the
+quarterly cycle (month in 3/6/9/12; APZ6 had 25k volume the same minute).
+ES/NQ are quarterly-only so unaffected. If SPI vanishes again around a roll,
+run the contract chain by hand (`reqContractDetails(Future("SPI","SNFE","AUD"))`)
+and check what `_active_front_contract` picks before assuming the gateway is down.
+
 **Yield curve** (`markets.py::get_yield_curve`) — FRED's `fredgraph.csv`
 per-maturity series (`DGS1MO` … `DGS30`), no API key, trimmed to ~2 years via
 `cosd=` so each fetch doesn't pull the full history back to 1962. 6-hour
@@ -1971,25 +2027,6 @@ later. `asx-signals-refresh.timer` (every 10 min) still runs too, now purely
 as a backstop in case the webhook call fails (e.g. this service was mid-restart
 when asxbrief polled). The page's "⚡ Classify now" button hits the same
 endpoint manually. If new announcements are ever going ungraded for more than
-**Futures panel (ES / NQ / SPI via IB Gateway)** — since 2026-09-07 the
-dashboard has a separate "Futures" section fed by `markets.py::refresh_futures`
-(one gateway session, `FUTURES_CONTRACTS`, delayed data type 4, persisted to
-`data/futures_cache.json`) and hit every 2 min by `asx-futures-refresh.timer`.
-`get_snapshot()` merges the cache in with `group: "futures"` and sets
-`futures_status` — `ok: false` (red "degraded" banner on the page) whenever
-any of ES/NQ/AP*0 is missing or older than 600s. `refresh_spi200` (the daily
-timer) is also IBKR-first now, Barchart only as fallback.
-**Front-contract selection (`_active_front_contract`) has bitten twice at
-the September roll:** (1) 2026-09-17/18 — IBKR returns expired contracts in the
-chain, so plain sorting picked the just-expired APU6 → no last → SPI silently
-absent; fixed by filtering `expiry >= today` (Sydney). (2) 2026-09-18 — SPI
-also lists *serial* months, so "nearest unexpired" became APV6 (October: 33
-contracts traded, `last = -1`) and SPI dropped again; fixed by preferring the
-quarterly cycle (month in 3/6/9/12; APZ6 had 25k volume the same minute).
-ES/NQ are quarterly-only so unaffected. If SPI vanishes again around a roll,
-run the contract chain by hand (`reqContractDetails(Future("SPI","SNFE","AUD"))`)
-and check what `_active_front_contract` picks before assuming the gateway is down.
-
 a few seconds, check the webhook first (`journalctl -u asxbrief | grep
 "signals webhook"`), not just the timer.
 

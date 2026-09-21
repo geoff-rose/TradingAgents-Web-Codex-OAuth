@@ -93,12 +93,13 @@
     <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
     <a href="/performance">Performance</a>
     <a href="/asx">ASX</a>
+    <a href="/recommendations">Morning Picks</a>
     <a href="/research">Patterns</a>
     <a href="/swing" class="active">Swing</a>
     <a href="/backtest">Backtest</a>
     <a href="/scanner">Scanner</a>
-    <a href="/watchlist">Watchlist</a>
     <a href="/setups">TechA</a>
+    <a href="/watchlist">Watchlist</a>
     <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
   </nav>
   <div class="nav-right">
@@ -139,7 +140,7 @@
 
   <section>
     <h2>Proposed Trades</h2>
-    <p class="section-note">From today's fitted range-model scan — approve to send a day-only limit entry to the paper IBKR account (expires at end of day if unfilled, a fresh one is quoted tomorrow), or reject to discard. Once filled, a fixed protective stop is placed and the target is re-quoted fresh every trading day the position stays open.</p>
+    <p class="section-note">Approve to send a day-only limit entry with linked protective stop and target orders to the paper IBKR account, or reject to discard. An unfilled entry expires at the end of the day. Exit orders remain active across sessions, and the target price is refreshed each trading day. Partial fills and uncertain broker responses stay visible until reconciled.</p>
     <div class="card">
       <table id="proposed-table">
         <thead><tr><th>Ticker</th><th>Entry</th><th>Target</th><th>Stop</th><th>Shares</th><th>$ Size</th><th>Rationale</th><th></th></tr></thead>
@@ -325,12 +326,12 @@
     document.getElementById('proposed-empty').style.display = proposed.length ? 'none' : '';
     document.getElementById('proposed-table').style.display = proposed.length ? '' : 'none';
 
-    const open = trades.filter(t => t.status === 'submitted' || t.status === 'open');
+    const open = trades.filter(t => ['submitting', 'submitted', 'partial', 'open', 'attention'].includes(t.status));
     const openBody = document.querySelector('#open-table tbody');
     openBody.innerHTML = open.map(t => `
       <tr>
         <td>${escapeHtml(t.ticker)}</td>
-        <td><span class="badge ${t.status}">${t.status}</span></td>
+        <td><span class="badge ${t.status}">${t.status}</span>${t.error ? '<br>' + escapeHtml(t.error) : ''}${t.filled_shares ? '<br>' + t.filled_shares + ' shares filled' : ''}</td>
         <td>${(t.entry_fill_price ?? t.entry_price).toFixed(3)}</td>
         <td>${t.target_price.toFixed(3)}</td>
         <td>${t.stop_price.toFixed(3)}</td>

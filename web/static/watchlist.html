@@ -193,12 +193,13 @@
     <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
     <a href="/performance">Performance</a>
     <a href="/asx">ASX</a>
+    <a href="/recommendations">Morning Picks</a>
     <a href="/research">Patterns</a>
     <a href="/swing">Swing</a>
     <a href="/backtest">Backtest</a>
     <a href="/scanner">Scanner</a>
-    <a href="/watchlist" class="active">Watchlist</a>
     <a href="/setups">TechA</a>
+    <a href="/watchlist" class="active">Watchlist</a>
     <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
   </nav>
   <div class="nav-right">
@@ -265,6 +266,9 @@
       <button class="btn2 ghost seg on" data-market="all">All</button>
       <button class="btn2 ghost seg" data-market="AU">ASX only</button>
       <button class="btn2 ghost seg" data-market="US">US only</button>
+      <span class="note" style="margin-left:8px">View:</span>
+      <button class="btn2 ghost seg on" data-trade-view="open">Open only</button>
+      <button class="btn2 ghost seg" data-trade-view="all">Include closed</button>
       <span class="note" id="trades-scope"></span>
     </div>
     <div class="grid4" id="summary" style="margin-bottom:14px"></div>
@@ -437,6 +441,7 @@ function render() {
 
 let tradesData = null;
 let tradesMarket = 'all';
+let tradesView = 'open';
 
 async function loadTrades() {
   const r = await fetch('/api/scanner/trades');
@@ -455,17 +460,19 @@ function renderTrades() {
   const keep = t => tradesMarket === 'all' || (t.market || 'AU') === tradesMarket;
   const openRows = (d.open || []).filter(keep);
   const closedRows = (d.closed || []).filter(keep);
+  const showClosed = tradesView === 'all';
+  const visibleRows = showClosed ? [...openRows, ...closedRows] : openRows;
   // The summary is recomputed from the FILTERED rows rather than reusing the
   // API's all-markets figures -- showing "8 open" above a table listing 3
   // would be worse than useless.
-  const realised = closedRows.map(t => t.pnl_pct).filter(v => v != null);
+  const realised = (showClosed ? closedRows : []).map(t => t.pnl_pct).filter(v => v != null);
   const wins = realised.filter(v => v > 0).length;
   const med = arr => {
     if (!arr.length) return null;
     const a = [...arr].sort((x, y) => x - y), m = Math.floor(a.length / 2);
     return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
   };
-  const dollarsAll = closedRows.map(t => t.pnl_dollars).filter(v => v != null)
+  const dollarsAll = (showClosed ? closedRows : []).map(t => t.pnl_dollars).filter(v => v != null)
     .concat(openRows.map(t => t.unrealised_dollars).filter(v => v != null));
   const s = {
     n_open: openRows.length, n_closed: closedRows.length,
@@ -474,22 +481,31 @@ function renderTrades() {
     median_pnl_pct: med(realised),
     total_pnl_dollars: dollarsAll.length ? dollarsAll.reduce((a, b) => a + b, 0) : null,
   };
-  const nAll = (d.open || []).length + (d.closed || []).length;
-  const nShown = openRows.length + closedRows.length;
-  $('#trades-scope').textContent = tradesMarket === 'all'
+  const nAll = openRows.length + closedRows.length;
+  const nShown = visibleRows.length;
+  const marketScope = tradesMarket === 'all'
     ? `${nAll} trade${nAll === 1 ? '' : 's'}`
-    : `${nShown} of ${nAll} trades`;
+    : `${nAll} market-matching trade${nAll === 1 ? '' : 's'}`;
+  $('#trades-scope').textContent = showClosed
+    ? marketScope
+    : `${nShown} open · ${closedRows.length} closed hidden`;
   $('#summary').innerHTML = [
-    ['Open', s.n_open ?? 0, ''], ['Closed', s.n_closed ?? 0, ''],
-    ['Win rate', s.win_rate_pct != null ? fmt(s.win_rate_pct, 1) + '%' : '—', ''],
+    ['Open', s.n_open ?? 0, ''],
+    [showClosed ? 'Closed' : 'Closed hidden', showClosed ? (s.n_closed ?? 0) : (s.n_closed ? `${s.n_closed}` : '0'), ''],
+    ['Win rate', showClosed && s.win_rate_pct != null ? fmt(s.win_rate_pct, 1) + '%' : '—', ''],
     ['Avg P&L', s.avg_pnl_pct != null ? fmt(s.avg_pnl_pct) + '%' : '—', cls(s.avg_pnl_pct)],
     ['Median P&L', s.median_pnl_pct != null ? fmt(s.median_pnl_pct) + '%' : '—', cls(s.median_pnl_pct)],
-    ['Total $', s.total_pnl_dollars != null ? fmt(s.total_pnl_dollars) : '—', cls(s.total_pnl_dollars)],
+    [showClosed ? 'Total $' : 'Open P&L $', s.total_pnl_dollars != null ? fmt(s.total_pnl_dollars) : '—', cls(s.total_pnl_dollars)],
   ].map(([k, v, c]) => `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
 
-  const all = [...openRows, ...closedRows];
-  if (!all.length) { $('#trades-body').innerHTML = '<tr><td colspan="13" class="note">No paper trades yet.</td></tr>'; return; }
-  $('#trades-body').innerHTML = all.map(t => {
+  if (!visibleRows.length) {
+    const message = showClosed
+      ? 'No paper trades yet.'
+      : (closedRows.length ? 'No open paper trades — select “Include closed” to view the history.' : 'No paper trades yet.');
+    $('#trades-body').innerHTML = `<tr><td colspan="13" class="note">${message}</td></tr>`;
+    return;
+  }
+  $('#trades-body').innerHTML = visibleRows.map(t => {
     const open = t.status === 'open';
     const pnlPct = open ? t.unrealised_pct : t.pnl_pct;
     const pnlDol = open ? t.unrealised_dollars : t.pnl_dollars;
@@ -527,6 +543,12 @@ function renderTrades() {
 document.querySelectorAll('.seg[data-market]').forEach(b => b.onclick = () => {
   tradesMarket = b.dataset.market;
   document.querySelectorAll('.seg[data-market]').forEach(x => x.classList.toggle('on', x === b));
+  renderTrades();
+});
+
+document.querySelectorAll('.seg[data-trade-view]').forEach(b => b.onclick = () => {
+  tradesView = b.dataset.tradeView;
+  document.querySelectorAll('.seg[data-trade-view]').forEach(x => x.classList.toggle('on', x === b));
   renderTrades();
 });
 

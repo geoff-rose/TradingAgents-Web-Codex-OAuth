@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Morning candidates — TradingAgents</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--bg:#0d1117;--surface:#161b22;--surface2:#1e1e24;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#388bfd;--buy:#22c55e;--sell:#ef4444;--hold:#f59e0b}
+  body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px}
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;height:53px;gap:24px}
+  .logo{font-weight:700;font-size:17px;letter-spacing:-.5px;color:var(--text);text-decoration:none} nav{display:flex;gap:4px;flex-wrap:wrap} nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:5px 10px;border-radius:6px} nav a:hover,nav a.active{background:var(--surface2);color:var(--text)}
+  .nav-right{margin-left:auto}.btn{background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 13px;font-size:13px;cursor:pointer}.btn:hover{border-color:var(--accent);color:var(--accent)}.btn:disabled{opacity:.5;cursor:not-allowed}
+  .page{max-width:1240px;margin:0 auto;padding:25px 16px 50px}h1{font-size:21px;margin-bottom:5px}.subtitle{color:var(--muted);font-size:13px;max-width:960px;line-height:1.5;margin-bottom:20px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:7px}.section{margin-bottom:26px}.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 18px}
+  .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.meta{color:var(--muted);font-size:12px}.status{border-radius:8px;padding:13px 16px;margin-bottom:18px;line-height:1.45}.status.ready{background:rgba(34,197,94,.11);border:1px solid rgba(34,197,94,.3)}.status.abstain{background:rgba(245,158,11,.11);border:1px solid rgba(245,158,11,.3);color:#f6c453}.status.empty{background:rgba(56,139,253,.1);border:1px solid rgba(56,139,253,.3)}
+  .market{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.pill{background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:5px 9px;color:var(--muted);font-size:12px}.pill strong{color:var(--text);font-weight:600}.pos{color:var(--buy)!important}.neg{color:var(--sell)!important}.warn{color:var(--hold)!important}
+  .picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.pick{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;min-height:310px}.pick.watch{border-color:rgba(245,158,11,.4)}.pick-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:11px}.rank{font-size:12px;color:var(--muted)}.ticker{font-size:23px;font-weight:750;letter-spacing:-.3px}.company{font-size:12px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.decision{font-size:10px;font-weight:700;border-radius:999px;padding:4px 8px;background:rgba(34,197,94,.14);color:var(--buy);white-space:nowrap}.decision.watch{background:rgba(245,158,11,.14);color:var(--hold)}.score{font-size:25px;font-weight:750;margin:6px 0 2px}.score small{font-size:11px;color:var(--muted);font-weight:500}.levels{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:13px 0}.levels.actual{grid-template-columns:repeat(4,1fr)}.level{background:var(--surface2);border-radius:6px;padding:7px}.level label{display:block;color:var(--muted);font-size:10px;text-transform:uppercase}.level b{font-size:13px}.rationale{color:#c9d1d9;font-size:12px;line-height:1.5;min-height:55px}.risk{color:var(--hold);font-size:11px;line-height:1.4;margin-top:9px}.components{display:flex;gap:4px;margin-top:12px;height:7px}.component{height:7px;border-radius:3px;background:var(--accent);opacity:.75}.component.news{background:#a78bfa}.component.macro{background:#f97316}.component.liquidity{background:#2ea043}.component.setup{background:#f59e0b}.component.event_volume{background:#db61a2}.component.relative_strength{background:#58a6ff}.component.trend{background:#79c0ff}.component.risk_guard{background:#ef4444}.component-legend{color:var(--muted);font-size:10px;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--border);white-space:nowrap}th{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.03em}tr:last-child td{border-bottom:0}.table-scroll{overflow-x:auto}.empty{padding:22px;text-align:center;color:var(--muted);font-size:13px}.note{color:var(--muted);font-size:12px;line-height:1.5}.source-list{color:var(--muted);font-size:12px;line-height:1.7}.source-list span{color:var(--text)}
+  @media(max-width:850px){.picks{grid-template-columns:1fr}.pick{min-height:0}header{padding:0 12px;gap:10px}nav a{padding:5px 6px;font-size:12px}.nav-right{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a href="/analysis">Run Analysis</a><a href="/reports">Reports</a><a href="/performance">Performance</a><a href="/asx">ASX</a><a href="/recommendations" class="active">Morning Picks</a><a href="/research">Patterns</a><a href="/swing">Swing</a><a href="/backtest">Backtest</a><a href="/scanner">Scanner</a><a href="/setups">TechA</a><a href="/watchlist">Watchlist</a><a href="/sync">Sync</a>
+  </nav>
+  <div class="nav-right"><button class="btn" id="refresh-btn" onclick="generate(true)">Refresh run</button></div>
+</header>
+<main class="page">
+  <h1>Morning candidates</h1>
+  <p class="subtitle">A pre-open, point-in-time ranking for ASX names that could be held for a few sessions. It rebuilds the candidate list from fresh ASX announcements, verified AI scores, overnight markets, VIX, rates, FX, Asian markets, commodities, sector beta, completed technicals and tradability. The score is a research ranking, not a probability of profit; the page can abstain when the evidence is weak. Testing treats <strong>previous close → session close</strong> as the primary full-day result, with open → close shown separately as the executable entry lens.</p>
+
+  <section class="section">
+    <div id="status" class="status empty">Loading the latest morning run…</div>
+    <div class="card toolbar"><span id="run-meta" class="meta">—</span><span id="run-msg" class="meta"></span><button class="btn" id="load-btn" onclick="loadLatest()">Reload</button></div>
+  </section>
+
+  <section class="section">
+    <h2>Top candidates</h2>
+    <div id="picks" class="picks"><div class="card empty">No run yet.</div></div>
+  </section>
+
+  <section class="section">
+    <h2>Overnight context</h2>
+    <div class="card"><div id="market" class="market"><span class="pill">—</span></div><p id="market-note" class="note" style="margin-top:12px"></p></div>
+  </section>
+
+  <section class="section">
+    <h2>My testing record</h2>
+    <div class="card toolbar" style="margin-bottom:10px"><label for="record-date" class="meta">Recommendation date</label><input id="record-date" type="date" onchange="loadDate(this.value)" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 9px;font:inherit"><span id="record-date-status" class="meta">Choose a date to inspect that morning's picks.</span></div>
+    <div class="card table-scroll"><table><thead><tr><th>Recommendation date</th><th>Entry session</th><th>Candidate</th><th>Prev close</th><th>Open</th><th>Gap</th><th>Prev close → close</th><th>Open → close</th><th>1d</th><th>3d</th><th>5d</th><th>10d</th><th>MFE 5d</th><th>MAE 5d</th></tr></thead><tbody id="record"></tbody></table><div id="record-empty" class="empty">Entry OHLC and outcomes are filled after the selected session has completed.</div></div>
+  </section>
+
+  <section class="section">
+    <h2>What this uses</h2>
+    <div class="card"><p class="source-list"><span>Technical:</span> completed daily OHLCV only, never today's partial bar; recent full-session momentum, trend confirmation, extension and volatility guards are causal at generation time. <span>Universe:</span> recommendation candidates are capped at the live top-500 market-cap band, with minimum history and median dollar-turnover checks. <span>News:</span> current ASX releases, verified AI scores, and a clearly labelled headline-only proxy while document scoring is pending. <span>Fresh context:</span> SPI/US futures, VIX, US 10Y, AUD/USD, Asian markets, gold, silver, copper, oil, iron ore when valid, and local sector beta. <span>Catalyst continuation:</span> scored price-sensitive catalysts can remain eligible for five subsequent ASX sessions, but only with above-50d, positive recent relative strength and at least two technical confirmations; decay and older evidence remain visible. <span>Rotation:</span> recent picks are excluded for three sessions unless they have a new current-session catalyst. <span>Testing:</span> prior-close-to-close is the primary recommendation-session result; open-to-close and later forward returns remain visible separately.</p></div>
+  </section>
+</main>
+<script>
+  const esc = s => { const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; };
+  const pct = v => v==null ? '—' : `${v>0?'+':''}${Number(v).toFixed(2)}%`;
+  const cls = v => v==null ? '' : (v>0?'pos':v<0?'neg':'');
+  const money = v => v==null ? '—' : Number(v).toFixed(3);
+  function renderMarket(m) {
+    const bits=[];
+    if (m.spi_expected_open_pct!=null) bits.push(`<span class="pill">SPI implied open <strong class="${cls(m.spi_expected_open_pct)}">${pct(m.spi_expected_open_pct)}</strong></span>`);
+    if (m.us_futures_avg_pct!=null) bits.push(`<span class="pill">US futures avg <strong class="${cls(m.us_futures_avg_pct)}">${pct(m.us_futures_avg_pct)}</strong></span>`);
+    if (m.vix_level!=null) bits.push(`<span class="pill">VIX <strong class="${m.vix_level>=28?'warn':''}">${Number(m.vix_level).toFixed(1)}</strong>${m.vix_change_pct!=null ? ` <span class="${cls(m.vix_change_pct)}">(${pct(m.vix_change_pct)})</span>` : ''}</span>`);
+    if (m.us10y_change_bps!=null) bits.push(`<span class="pill">US 10Y <strong>${m.us10y_change_bps>0?'+':''}${Number(m.us10y_change_bps).toFixed(0)}bp</strong></span>`);
+    if (m.audusd_change_pct!=null) bits.push(`<span class="pill">AUD/USD <strong class="${cls(m.audusd_change_pct)}">${pct(m.audusd_change_pct)}</strong></span>`);
+    if (m.asia_avg_pct!=null) bits.push(`<span class="pill">Asia avg <strong class="${cls(m.asia_avg_pct)}">${pct(m.asia_avg_pct)}</strong></span>`);
+    Object.entries(m.commodities||{}).forEach(([name,v])=>bits.push(`<span class="pill">${esc(v.label||name)} <strong class="${cls(v.change_pct)}">${pct(v.change_pct)}</strong></span>`));
+    bits.push(`<span class="pill">Futures cache <strong class="${m.futures_fresh?'pos':'warn'}">${m.futures_fresh?'fresh':'stale / unavailable'}</strong></span>`);
+    document.getElementById('market').innerHTML=bits.join('');
+    document.getElementById('market-note').textContent=(m.reasons||[]).join(' · ') || 'No market-wide abstain trigger was detected in the cached context.';
+  }
+  function componentBar(parts) {
+    const keys=['trend','relative_strength','setup','liquidity','news','macro','event_volume','risk_guard'];
+    const max={trend:15,relative_strength:10,setup:10,liquidity:10,news:30,macro:15,event_volume:10,risk_guard:4};
+    return `<div class="components">${keys.map(k=>`<span class="component ${k}" title="${k}: ${parts[k]||0}" style="width:${Math.max(3,100*Math.abs(parts[k]||0)/max[k]/keys.length)}%"></span>`).join('')}</div><div class="component-legend">trend · recent relative strength · setup · liquidity · fresh news · macro · prior volume · guard</div>`;
+  }
+  function renderPicks(rows) {
+    const root=document.getElementById('picks');
+    if(!rows.length){root.innerHTML='<div class="card empty">No candidate cleared the filters. That is an intentional abstain, not a missing result.</div>';return;}
+    root.innerHTML=rows.map(r=>{
+      const watch=r.decision!=='BUY_CANDIDATE';
+      const risks=(r.risks||[]).length?`<div class="risk">Risk flags: ${esc(r.risks.join(' · '))}</div>`:'';
+      const actual=r.entry_open==null?'':`<div class="levels actual"><div class="level"><label>Prev close</label><b>${money(r.entry_prev_close||r.reference_price)}</b></div><div class="level"><label>Entry open</label><b>${money(r.entry_open)}</b></div><div class="level"><label>Full day</label><b class="${cls(r.entry_session_pct)}">${pct(r.entry_session_pct)}</b></div><div class="level"><label>Open → close</label><b class="${cls(r.entry_open_to_close_pct)}">${pct(r.entry_open_to_close_pct)}</b></div></div>`;
+      return `<article class="pick ${watch?'watch':''}"><div class="pick-head"><div><div class="rank">#${r.rank} · ${esc(r.sector||'Unknown')}</div><div class="ticker">${esc(r.ticker)}</div><div class="company">${esc(r.company)}</div></div><span class="decision ${watch?'watch':''}">${watch?'WATCH ONLY':'BUY CANDIDATE'}</span></div><div class="score">${Number(r.score).toFixed(1)}<small>/100 evidence score</small></div><div class="levels"><div class="level"><label>Pre-open reference</label><b>${money(r.reference_price)}</b></div><div class="level"><label>Illustrative target</label><b class="pos">${money(r.target_price)}</b></div><div class="level"><label>Risk level</label><b class="neg">${money(r.stop_price)}</b></div></div>${actual}<p class="rationale">${esc(r.rationale)}</p>${risks}${componentBar(r.components||{})}</article>`;
+    }).join('');
+  }
+  function renderRecord(data) {
+    const run=data.run;
+    const rows=run ? (data.recommendations||[]).map(r=>({...r,trade_date:run.trade_date,status:run.status})) : [];
+    const body=document.getElementById('record');
+    body.innerHTML=rows.map(r=>`<tr><td>${esc(r.trade_date)}</td><td>${esc(r.entry_date||'—')}</td><td>${esc(r.ticker)}</td><td>${money(r.entry_prev_close||r.reference_price)}</td><td>${money(r.entry_open)}</td><td class="${cls(r.entry_gap_pct)}">${pct(r.entry_gap_pct)}</td><td class="${cls(r.entry_session_pct)}"><strong>${pct(r.entry_session_pct)}</strong></td><td class="${cls(r.entry_open_to_close_pct)}">${pct(r.entry_open_to_close_pct)}</td><td class="${cls(r.fwd_1d_pct)}">${pct(r.fwd_1d_pct)}</td><td class="${cls(r.fwd_3d_pct)}">${pct(r.fwd_3d_pct)}</td><td class="${cls(r.fwd_5d_pct)}">${pct(r.fwd_5d_pct)}</td><td class="${cls(r.fwd_10d_pct)}">${pct(r.fwd_10d_pct)}</td><td class="${cls(r.mfe_5d_pct)}">${pct(r.mfe_5d_pct)}</td><td class="${cls(r.mae_5d_pct)}">${pct(r.mae_5d_pct)}</td></tr>`).join('');
+    const empty=document.getElementById('record-empty');
+    empty.style.display=rows.length?'none':'';
+    empty.textContent=run ? 'No recommendations were stored for this date.' : 'No recommendation run exists for this date.';
+    document.getElementById('record-date-status').textContent=run
+      ? `${rows.length} candidate${rows.length===1?'':'s'} picked · entry OHLC is shown only after the session has completed.`
+      : 'No recommendation run found for that date.';
+  }
+  async function loadLatest(){
+    try{const res=await fetch('/api/recommendations/latest');const data=await res.json();render(data);}catch(e){document.getElementById('status').textContent='Unable to load the latest run: '+e.message;document.getElementById('status').className='status abstain';}
+  }
+  async function loadDate(date){
+    if(!date){return loadLatest();}
+    try{const res=await fetch('/api/recommendations/latest?trade_date='+encodeURIComponent(date));const data=await res.json();render(data);}catch(e){document.getElementById('record-date-status').textContent='Unable to load that date: '+e.message;}
+  }
+  async function generate(force){
+    const b=document.getElementById('refresh-btn');b.disabled=true;b.textContent='Generating…';
+    try{const res=await fetch('/api/recommendations/generate?force='+Boolean(force),{method:'POST'});const data=await res.json();if(!res.ok)throw new Error(data.detail||'generation failed');render(data);}catch(e){document.getElementById('run-msg').textContent=e.message;}finally{b.disabled=false;b.textContent='Refresh run';}
+  }
+  function render(data){
+    const r=data.run;
+    if(!r){document.getElementById('status').textContent=`No morning run exists for ${data.requested_trade_date||'the selected date'}. The scheduled job runs at 09:50 Sydney on weekdays.`;document.getElementById('status').className='status empty';document.getElementById('picks').innerHTML='<div class="card empty">No picks were recorded for this date.</div>';document.getElementById('market').innerHTML='<span class="pill">—</span>';renderRecord(data);return;}
+    const stale=r.is_current===false; const abstain=!String(r.status||'').startsWith('ready')||stale;const n=(data.recommendations||[]).length;const title=stale?'NO CURRENT RUN — LAST COMPLETED RUN SHOWN':abstain?'ABSTAIN / WATCHLIST ONLY':(n===3?'THREE CANDIDATES READY FOR REVIEW':`${n} CANDIDATE${n===1?'':'S'} READY FOR REVIEW`);
+    const note=stale?`No completed run is stored for ${r.requested_trade_date||'today'}; this is the ${r.trade_date} run. ${r.note||''}`:r.note||'';
+    document.getElementById('status').innerHTML=`<strong>${title}</strong> — ${esc(note)}`;
+    document.getElementById('status').className='status '+(abstain?'abstain':'ready');
+    document.getElementById('record-date').value=r.trade_date;
+    document.getElementById('run-meta').textContent=`Trade date ${r.trade_date} · generated ${r.generated_at} · technical data through ${r.as_of_date||'—'} · ${r.strategy_version}${stale?' · not current':''}`;
+    renderMarket(r.market_regime||{});renderPicks(data.recommendations||[]);renderRecord(data);
+  }
+  loadLatest();
+</script>
+</body>
+</html>

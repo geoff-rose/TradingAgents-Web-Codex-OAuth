@@ -129,8 +129,9 @@ def _prior_announcements(ticker: str, released_at: str,
         try:
             q = ",".join("?" * len(rows))
             scores = {r[0]: r[1] for r in c2.execute(
-                f"SELECT fingerprint, score FROM signals WHERE fingerprint IN ({q})",
-                [r["fingerprint"] for r in rows])}
+                f"SELECT fingerprint, score FROM signals WHERE fingerprint IN ({q}) "
+                "AND document_sha256 IS NOT NULL AND classified_at < ?",
+                [*[r["fingerprint"] for r in rows], released_at])}
         except Exception:
             pass
         finally:

@@ -39,9 +39,13 @@
   /* ── Market snapshot tiles ── */
   .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  a.tile-link { display: block; color: inherit; text-decoration: none; cursor: pointer; transition: border-color .12s, background .12s, transform .12s; }
+  a.tile-link:hover { border-color: var(--accent); background: var(--surface2); transform: translateY(-1px); }
+  a.tile-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .tile .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   .tile .value { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
   .tile .change { font-size: 12px; font-weight: 600; }
+  .tile .meta { font-size: 10px; color: var(--muted); margin-top: 6px; line-height: 1.3; }
   .pos { color: var(--buy); }
   /* Sector board reuses .tile so it reads as one continuous board with the
      Markets panel above rather than a second, differently-shaped widget. */
@@ -144,16 +148,17 @@
     <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
     <a href="/performance">Performance</a>
     <a href="/asx" class="active">ASX</a>
+    <a href="/recommendations">Morning Picks</a>
     <a href="/research">Patterns</a>
     <a href="/swing">Swing</a>
     <a href="/backtest">Backtest</a>
     <a href="/scanner">Scanner</a>
+    <a href="/setups">TechA</a>
     <a href="/watchlist">Watchlist</a>
     <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
   </nav>
   <div class="nav-right">
     <span class="collector-status" id="collector-status"><span class="dot" id="collector-dot"></span><span id="collector-text">checking collector…</span></span>
-    <a href="/setups">TechA</a>
     <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
   </div>
 </header>
@@ -163,7 +168,8 @@
   <p class="subtitle">Market snapshot, sector performance, the US Treasury yield curve, and the live ASX announcement stream.</p>
 
   <section>
-    <h2>Markets</h2>
+    <h2>Markets <span id="market-asof" class="muted" style="font-size:13px;font-weight:400"></span></h2>
+    <div id="market-status" class="note muted" style="margin:-4px 0 10px;font-size:12px"></div>
     <div class="tiles" id="tiles">
       <div class="loading">Loading…</div>
     </div>
@@ -187,9 +193,9 @@
   <section>
     <h2>International</h2>
     <p class="note muted" style="margin:-4px 0 10px;font-size:13px">
-      Asian markets, which trade <em>during</em> the ASX session rather than after it —
-      Tokyo, Seoul, Hong Kong, Shanghai and Singapore all overlap Sydney hours, so these
-      move while you are watching.
+      Cash indices and international markets, with a live open/closed indicator
+      for each exchange. Asian markets overlap Sydney hours, while the U.S.
+      indices show whether their cash sessions are currently trading.
     </p>
     <div class="tiles" id="intl-tiles">
       <div class="loading">Loading…</div>
@@ -198,6 +204,7 @@
 
   <section>
     <h2>Sectors <span id="sector-asof" class="muted" style="font-size:13px;font-weight:400"></span></h2>
+    <p class="note muted" style="margin:-4px 0 10px;font-size:12px">Sector moves use the latest completed daily close; they are not intraday quotes.</p>
     <div class="tiles" id="sectors">
       <div class="loading">Loading…</div>
     </div>
@@ -294,33 +301,74 @@
       const data = await res.json();
       const wrap = document.getElementById('tiles');
       const futWrap = document.getElementById('futures-tiles');
+      const ageText = seconds => seconds == null ? '' :
+        (seconds < 90 ? 'checked just now' : `checked ${Math.round(seconds / 60)} min ago`);
+      const sourceText = item => {
+        const source = String(item.source || 'unknown').toLowerCase();
+        const name = source === 'ibkr' ? 'IBKR delayed' : source === 'yahoo-fallback' ? 'Yahoo fallback'
+          : source === 'yahoo' ? 'Yahoo' : source === 'tradingview' ? 'TradingView live'
+          : source === 'ecb' ? 'ECB daily' : source === 'rba' ? 'RBA daily'
+          : source === 'boe' ? 'BoE daily' : source;
+        const fetched = item.fetched_at;
+        const seconds = item.data_age_seconds != null ? item.data_age_seconds
+          : typeof fetched === 'number' ? Math.max(0, Date.now() / 1000 - fetched) : null;
+        const age = ageText(seconds);
+        const asof = item.as_of && item.as_of !== 'live' ? ` · ${item.as_of}` : '';
+        return `${name}${age ? ` · ${age}` : ''}${asof}`;
+      };
+      const meta = item => `<div class="meta">${sourceText(item)}</div>`;
       // Open/closed light. Grey when the schedule is unknown -- an unknown
       // state must not be dressed up as either colour.
       const dot = i => i.is_open === undefined || i.is_open === null ? ''
         : `<span class="mkt-dot ${i.is_open ? 'open' : 'shut'}" title="${
              i.is_open ? 'Market open' : 'Market closed'}"></span>`;
+      const sourceHref = item => {
+        if (item.source_url && /^https?:\/\//i.test(item.source_url)) return item.source_url;
+        const symbol = String(item.symbol || '');
+        if (symbol === 'AP*0' || symbol === 'AP*0-CHG') {
+          return 'https://www.barchart.com/futures/quotes/AP*0';
+        }
+        if (symbol === 'AU10Y') return 'https://www.tradingview.com/symbols/TVC-AU10Y/';
+        if (symbol === 'UK10Y') return 'https://www.tradingview.com/symbols/TVC-GB10Y/';
+        if (symbol === 'EU10Y') return 'https://data.ecb.europa.eu/data/datasets/YC/YC.B.U2.EUR.4F.G_N_C.SV_C_YM.SR_10Y';
+        if (symbol === 'ES=F') return 'https://www.tradingview.com/symbols/CME_MINI-ES1!/';
+        if (symbol === 'NQ=F') return 'https://www.tradingview.com/symbols/CME_MINI-NQ1!/';
+        return symbol ? `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/` : null;
+      };
+      const tileShell = (item, body) => {
+        const href = sourceHref(item);
+        if (!href) return `<div class="tile">${body}</div>`;
+        return `<a class="tile tile-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(item.label || 'market')} source">${body}</a>`;
+      };
       const tile = item => {
         if (item.last == null) {
-          return `<div class="tile"><div class="label">${dot(item)}${item.label}</div><div class="value neu">—</div></div>`;
+          return tileShell(item, `<div class="label">${dot(item)}${escapeHtml(item.label)}</div><div class="value neu">—</div>${meta(item)}`);
         }
         if (item.is_point_diff) {
           const cls = item.last > 0 ? 'pos' : item.last < 0 ? 'neg' : 'neu';
           const sign = item.last > 0 ? '+' : '';
-          return `<div class="tile">
-            <div class="label">${dot(item)}${item.label}</div>
+          return tileShell(item, `
+            <div class="label">${dot(item)}${escapeHtml(item.label)}</div>
             <div class="value ${cls}">${sign}${item.last.toFixed(0)} pts</div>
-          </div>`;
+            ${meta(item)}
+          `);
         }
         const decimals = Math.abs(item.last) < 20 ? 3 : 2;
         const cls = item.change_pct > 0 ? 'pos' : item.change_pct < 0 ? 'neg' : 'neu';
         const sign = item.change_pct > 0 ? '+' : '';
-        const unit = item.symbol === '^TNX' ? '%' : '';
+        const unit = ['^TNX', 'AU10Y', 'EU10Y', 'UK10Y'].includes(item.symbol) ? '%' : '';
         const value = item.last.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-        return `<div class="tile">
-          <div class="label">${dot(item)}${item.label}</div>
+        const changeValue = Number(item.change_pct);
+        const change = item.change_pct == null || !Number.isFinite(changeValue)
+          ? '—' : `${sign}${changeValue.toFixed(2)}%`;
+        const implied = item.implied_open_pct == null ? ''
+          : `<div class="sub">ASX implied open ${pct(item.implied_open_pct, 2)}</div>`;
+        return tileShell(item, `
+          <div class="label">${dot(item)}${escapeHtml(item.label)}</div>
           <div class="value">${value}${unit}</div>
-          <div class="change ${cls}">${sign}${item.change_pct.toFixed(2)}%</div>
-        </div>`;
+          <div class="change ${cls}">${change}</div>
+          ${implied}${meta(item)}
+        `);
       };
       const isFut = i => i.group === 'futures';
       // The section heading already says "futures", so drop the suffix the API
@@ -360,6 +408,11 @@
           + `previous settlement rather than the live overnight move. Check `
           + `<code>systemctl status ibgateway asx-futures-refresh</code>.</span></div>`;
       }
+      const checked = data.fetched_at ? new Date(data.fetched_at * 1000).toISOString() : null;
+      document.getElementById('market-asof').textContent = checked ? `— checked ${fmtTime(checked)}` : '';
+      document.getElementById('market-status').textContent = checked
+        ? 'Values are checked on each dashboard refresh; closed-market rows show the latest published quote.'
+        : 'Market data timestamp unavailable.';
     } catch (e) {
       const msg = `<div class="error">Failed to load market snapshot: ${e.message}</div>`;
       document.getElementById('tiles').innerHTML = msg;
@@ -380,11 +433,20 @@
     const c = cls(d);
     const sub = [s.week_pct, s.month_pct].every(v => v == null) ? '' :
       `<div class="sub">wk ${pct(s.week_pct, 1)} · mo ${pct(s.month_pct, 1)}</div>`;
-    return `<div class="tile${isMarket ? ' market-row' : ''}">
-      <div class="label">${s.label}</div>
+    const asof = s.as_of ? `${s.stale ? 'stale daily bar' : 'daily close'} · ${s.as_of}` : 'no date';
+    const href = s.source_url && /^https?:\/\//i.test(s.source_url)
+      ? s.source_url
+      : s.symbol ? `https://finance.yahoo.com/quote/${encodeURIComponent(s.symbol)}/` : null;
+    const tag = href
+      ? `<a class="tile tile-link${isMarket ? ' market-row' : ''}" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(s.label || 'sector')} source">`
+      : `<div class="tile${isMarket ? ' market-row' : ''}">`;
+    const close = href ? '</a>' : '</div>';
+    return `${tag}
+      <div class="label">${escapeHtml(s.label)}</div>
       <div class="value ${c}">${pct(d)}</div>
       ${sub}
-    </div>`;
+      <div class="meta">${asof}</div>
+    ${close}`;
   }
 
   async function loadSectors() {
@@ -392,10 +454,11 @@
     try {
       const res = await fetch('/api/markets/sectors');
       const data = await res.json();
-      const rows = data.sectors || [];
+      const rows = (data.sectors || []).slice().sort((a, b) =>
+        String(a.label || '').localeCompare(String(b.label || ''), 'en', { sensitivity: 'base' }));
       if (!rows.length) { wrap.innerHTML = '<div class="loading">No sector data</div>'; return; }
       document.getElementById('sector-asof').textContent =
-        data.as_of ? `— ${data.as_of}` : '';
+        data.as_of ? `— latest completed session ${data.as_of}${(data.stale_symbols || []).length ? ` · ${data.stale_symbols.length} stale` : ''}` : '';
       wrap.innerHTML = sectorTile(data.market, true)
         + rows.map(s => sectorTile(s, false)).join('');
     } catch (e) {
@@ -558,6 +621,14 @@
       + `${escapeHtml(r.sector)}${r.sector_weak ? '°' : ''}</span>`;
   }
 
+  function evidenceLabel(row) {
+    const labels = {document_read: 'PDF read', document_excerpt: 'PDF excerpt',
+      awaiting_document: 'Awaiting PDF', awaiting_documents: 'Awaiting PDFs',
+      awaiting_document_score: 'Awaiting score', classification_failed: 'Score failed',
+      document_unavailable: 'PDF unavailable', routine_not_scored: 'Routine filing'};
+    return `<span class="time">${labels[row.evidence_status] || 'Unscored'}</span>`;
+  }
+
   function renderFeedTable() {
     let rows = feedRows;
     if (sortKey) {
@@ -600,12 +671,13 @@
         : '<span class="time">—</span>';
       // A net score and a single-announcement score are different claims, so
       // they are labelled differently rather than shown as one anonymous number.
-      let scoreCell = r.score != null ? String(r.score) : '<span class="time">—</span>';
+      let scoreCell = r.score != null ? String(r.score) : evidenceLabel(r);
       if (feedGrouped && r.score != null) {
         const spread = (r.score_range && r.score_range[0] !== r.score_range[1])
           ? ` <span class="time" title="individual announcement scores ranged ${r.score_range[0]}–${r.score_range[1]}">(${r.score_range[0]}–${r.score_range[1]})</span>` : '';
         scoreCell = `${r.score}${r.is_net ? ' <span class="time" title="Net score for all of this company\'s announcements this session">net</span>' : ''}${spread}`;
       }
+      if (r.score != null) scoreCell += ' ' + evidenceLabel(r);
       const key = feedGrouped ? `${r.ticker}|${r.session_date}` : null;
       const isOpen = key && expanded.has(key);
       const caret = (feedGrouped && r.n_announcements > 1)
@@ -623,7 +695,7 @@
         <td>${scoreCell}</td>
         <td class="headline">${escapeHtml(r.headline)}</td>
         <td>${link}</td>
-        <td><button class="btn" data-watch="${r.ticker}" title="Add to watchlist">+ Watch</button></td>
+        <td><button class="btn" data-memory="${escapeHtml(r.ticker)}">Facts</button> <button class="btn" data-watch="${r.ticker}" title="Add to watchlist">+ Watch</button></td>
       </tr>`;
       if (!isOpen || !r.children) return main;
       const kids = r.children.map(c => `<tr style="background:rgba(255,255,255,0.02)">
@@ -631,7 +703,7 @@
         <td></td><td></td><td></td><td></td>
         <td>${c.is_halt ? '<span class="badge halt">HALT</span> ' : ''}${c.price_sensitive ? '<span class="badge ps">PS</span>' : ''}</td>
         <td>${c.signal ? `<span class="badge signal-${c.signal.toLowerCase()}" title="${escapeHtml(c.signal_reason || '')}">${c.signal}</span>` : '<span class="time">—</span>'}</td>
-        <td>${c.score != null ? c.score : '<span class="time">—</span>'}</td>
+        <td>${c.score != null ? c.score + ' ' : ''}${evidenceLabel(c)}</td>
         <td class="headline" style="padding-left:18px">${escapeHtml(c.headline)}</td>
         <td>${c.url ? `<a class="pdf-link" href="${c.url}" target="_blank" rel="noopener">PDF</a>` : ''}</td>
         <td></td>
@@ -825,6 +897,34 @@
     document.getElementById('feed-search').value = '';
     applyFeedSearch('');
   };
+
+  const memoryDialog = document.createElement('dialog');
+  memoryDialog.style.cssText = 'background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;width:850px;max-width:90vw;max-height:85vh;overflow:auto';
+  document.body.appendChild(memoryDialog);
+  document.addEventListener('click', async event => {
+    const button = event.target.closest('button[data-memory]');
+    if (!button) return;
+    memoryDialog.innerHTML = '<button id="memory-close" class="btn">Close</button><div id="memory-content">Loading sourced facts…</div>';
+    memoryDialog.querySelector('#memory-close').onclick = () => memoryDialog.close();
+    if (!memoryDialog.open) memoryDialog.showModal();
+    const content = memoryDialog.querySelector('#memory-content');
+    try {
+      const response = await fetch('/api/asx/memory/' + encodeURIComponent(button.dataset.memory));
+      if (!response.ok) throw new Error('Unable to load facts; check your login.');
+      const data = await response.json();
+      content.innerHTML = `<h2>${escapeHtml(data.ticker)} — sourced facts</h2><p>History is built gradually. A claim missing from our records is not necessarily new.</p>`;
+      if (!data.documents.length) content.innerHTML += '<p>No documents processed yet. Facts will appear as announcements are assessed.</p>';
+      for (const doc of data.documents) {
+        const changes = doc.comparison ? JSON.parse(doc.comparison.changes_json) : [];
+        content.innerHTML += `<h3>${escapeHtml(doc.headline || '')}</h3><p>${escapeHtml(doc.published_at)} · ${doc.complete ? 'Text sections processed' : 'Processing'} ${doc.sections_done}/${doc.section_count}</p>`;
+        for (const fact of doc.facts) {
+          const change = changes.find(c => c.current_id === fact.id);
+          content.innerHTML += `<details><summary>${change ? escapeHtml(change.status) + ' · ' : ''}${escapeHtml(fact.claim)}</summary><p>${escapeHtml(fact.subject)}${fact.page ? ' · page ' + fact.page : ''}</p><blockquote>${escapeHtml(fact.quote)}</blockquote>${change ? '<p>' + escapeHtml(change.reason || '') + '</p>' : ''}</details>`;
+        }
+        if (doc.url && /^https?:\/\//i.test(doc.url)) content.innerHTML += `<p><a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">Source document</a></p>`;
+      }
+    } catch (error) { content.textContent = error.message; }
+  });
 
   loadSnapshot();
   loadSectors();

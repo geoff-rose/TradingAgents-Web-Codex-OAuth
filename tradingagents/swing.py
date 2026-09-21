@@ -1,28 +1,16 @@
-"""Orchestration for the Swing Trade page: proposal generation, semi-automatic
-approval into a real (paper) IBKR order, daily target refresh, and status
-sync back from IBKR into swing_db. See swing_signal.py/range_model.py for the
-two signal sources and swing_ibkr.py for the IBKR mechanics -- this module
-wires them to swing_db and is what web/server.py's /api/swing/* routes call.
+"""Swing proposals, per-trade approval, daily target refresh and reconciliation.
 
-Two strategies coexist in swing_trades (`strategy` column):
-
-- 'heuristic' (original): proposed -(approve)-> submitted -(parent fill)->
-  open -(target or stop fill)-> closed, via a single GTC bracket order. Kept
-  for reference; no longer proposed live by default (backtest.py showed it
-  loses to random entries).
-- 'range_model' (phase-3 §6, added 2026-08-21): proposed -(approve)-> a
-  single DAY entry order -(filled same day, or expires)-> 'open' (stop placed
-  once, GTC) or 'expired' (day order lapsed unfilled -- a fresh proposal
-  follows tomorrow, not a retry of the same row) -(daily-refreshed target or
-  the fixed stop fills)-> closed. `daily_refresh()` is the once-a-day job
-  that generates new proposals for flat tickers AND re-quotes the target for
-  open ones; `sync_all()` is the frequent (every 15 min) job that just polls
-  IBKR for fills and updates local state -- it doesn't touch the model.
+Both strategies use paper brackets; range-model entries are DAY orders and
+exits are GTC. The web service reconciles active orders every five seconds
+between broker calls. Partial or uncertain execution remains active until
+confirmed, preventing a new proposal from duplicating unresolved exposure.
 """
 
 from __future__ import annotations
 
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from tradingagents import swing_db, swing_ibkr, swing_signal
@@ -34,7 +22,7 @@ def propose_daily() -> dict[str, Any]:
     One pass over the enabled swing universe: skip tickers with an
     already-active (proposed/submitted/open) trade, run the heuristic on the
     rest, create a proposal row for anything that qualifies."""
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    today = datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
     trade_dollars = swing_db.get_trade_dollars()
     created, skipped, no_setup = [], [], []
     for ticker in swing_db.enabled_tickers():
@@ -70,7 +58,7 @@ def propose_daily_range_model() -> dict[str, Any]:
     from tradingagents.backtest import STOP_ATR_MULT, fetch_daily_history, round_to_tick
     from tradingagents.range_model import build_features, fit, pool_training_data, predict
 
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    today = datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
     trade_dollars = swing_db.get_trade_dollars()
     entry_q, target_q = swing_db.get_range_model_quantiles()
 
@@ -110,6 +98,7 @@ def propose_daily_range_model() -> dict[str, Any]:
     return {"created": created, "no_data": no_data, "entry_q": entry_q, "target_q": target_q}
 
 
+@swing_ibkr.serialized
 def approve_trade(trade_id: int) -> dict[str, Any]:
     trade = swing_db.get_trade(trade_id)
     if not trade:
@@ -117,20 +106,22 @@ def approve_trade(trade_id: int) -> dict[str, Any]:
     if trade["status"] != "proposed":
         return {"ok": False, "error": f"trade is '{trade['status']}', not 'proposed'"}
 
-    if trade["strategy"] == "range_model":
-        result = swing_ibkr.place_day_entry(trade["ticker"], trade["shares"], trade["entry_price"])
-        if not result["ok"]:
-            swing_db.update_trade(trade_id, status="error", error=result["error"])
-            return result
-        swing_db.update_trade(trade_id, status="submitted", ibkr_parent_id=result["order_id"])
-        return {"ok": True}
-
-    result = swing_ibkr.place_bracket(
-        trade["ticker"], trade["shares"], trade["entry_price"],
-        trade["target_price"], trade["stop_price"],
-    )
+    if not (0 < trade["stop_price"] < trade["entry_price"] < trade["target_price"] and trade["shares"] > 0):
+        return {"ok": False, "error": "Invalid bracket prices or quantity"}
+    if not swing_db.claim_proposal(trade_id):
+        return {"ok": False, "error": "Proposal already claimed"}
+    def persist(ids):
+        swing_db.update_trade(trade_id, **{f"ibkr_{k}": v for k, v in ids.items()})
+    try:
+        result = swing_ibkr.place_bracket(
+            trade["ticker"], trade["shares"], trade["entry_price"],
+            trade["target_price"], trade["stop_price"], day_entry=trade["strategy"] == "range_model",
+            order_ref=f"swing-{trade_id}", persist_ids=persist,
+        )
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc)}
     if not result["ok"]:
-        swing_db.update_trade(trade_id, status="error", error=result["error"])
+        swing_db.update_trade(trade_id, status="attention", error=result["error"])
         return result
     swing_db.update_trade(
         trade_id, status="submitted",
@@ -150,6 +141,7 @@ def reject_trade(trade_id: int) -> dict[str, Any]:
     return {"ok": True}
 
 
+@swing_ibkr.serialized
 def refresh_open_targets() -> dict[str, Any]:
     """Daily-refresh half of the range-model mechanic: for every 'open'
     range_model trade whose target order wasn't already quoted today, cancel
@@ -161,7 +153,7 @@ def refresh_open_targets() -> dict[str, Any]:
     from tradingagents.backtest import fetch_daily_history
     from tradingagents.range_model import build_features, fit, pool_training_data, predict_pct
 
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    today = datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
     open_trades = [t for t in swing_db.list_trades("open") if t["strategy"] == "range_model"]
     open_trades = [t for t in open_trades if t["target_order_date"] != today]
     if not open_trades:
@@ -199,73 +191,92 @@ def refresh_open_targets() -> dict[str, Any]:
     return {"refreshed": refreshed, "errors": errors}
 
 
+@swing_ibkr.serialized
 def sync_all() -> dict[str, Any]:
-    """Pull fresh status for every submitted/open trade's IBKR order ids and
-    reconcile: parent fill -> open; a bracket/target-or-stop child fill ->
-    closed with pnl. For 'range_model' trades specifically: a filled entry
-    also triggers placing the (fixed) GTC stop for the first time (the
-    heuristic's bracket already includes its stop from approval time, but
-    range_model's entry is a standalone DAY order with no children yet); an
-    entry day-order that the exchange itself cancelled (unfilled by end of
-    day) transitions to 'expired', not left dangling in 'submitted' forever
-    -- tomorrow's daily_refresh() will propose a fresh entry, not retry this
-    one. This function never touches the model -- that's daily_refresh()'s
-    job, run once a day; this just polls IBKR order status, safe to run
-    every few minutes."""
-    trades = swing_db.list_trades("submitted") + swing_db.list_trades("open")
-    if not trades:
-        return {"checked": 0, "updated": 0}
-
-    order_ids: list[int] = []
+    """Reconcile cumulative fills; uncertain broker state remains active and visible."""
+    trades = [t for t in swing_db.list_trades() if t["status"] in swing_db.ACTIVE_STATUSES
+              and t["status"] != "proposed"]
+    ids = [t[k] for t in trades for k in ("ibkr_parent_id", "ibkr_target_id", "ibkr_stop_id") if t[k]]
+    statuses = swing_ibkr.fetch_order_statuses(ids)
+    terminal = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+    updated, errors = 0, []
     for t in trades:
-        order_ids += [i for i in (t["ibkr_parent_id"], t["ibkr_target_id"], t["ibkr_stop_id"]) if i]
-    statuses = swing_ibkr.fetch_order_statuses(order_ids)
-
-    updated = 0
-    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    for t in trades:
-        parent = statuses.get(t["ibkr_parent_id"], {})
-        target = statuses.get(t["ibkr_target_id"], {})
-        stop = statuses.get(t["ibkr_stop_id"], {})
-
-        if t["status"] == "submitted" and parent.get("status") == "Filled":
-            if t["strategy"] == "range_model":
-                stop_result = swing_ibkr.place_stop(t["ticker"], t["shares"], t["stop_price"])
-                if not stop_result["ok"]:
-                    swing_db.update_trade(t["id"], status="error", error=stop_result["error"])
-                    updated += 1
-                    continue
-                swing_db.update_trade(
-                    t["id"], status="open", entered_at=now,
-                    entry_fill_price=parent.get("fill_price"), ibkr_stop_id=stop_result["order_id"],
-                )
-            else:
-                swing_db.update_trade(
-                    t["id"], status="open", entered_at=now,
-                    entry_fill_price=parent.get("fill_price"),
-                )
-            updated += 1
-            continue
-
-        if t["status"] == "submitted" and t["strategy"] == "range_model" and parent.get("status") == "Cancelled":
-            swing_db.update_trade(t["id"], status="expired")
-            updated += 1
-            continue
-
-        if t["status"] == "open":
-            hit, reason = None, None
-            if target.get("status") == "Filled":
-                hit, reason = target, "target"
-            elif stop.get("status") == "Filled":
-                hit, reason = stop, "stop"
-            if hit:
-                exit_price = hit.get("fill_price")
-                entry_price = t["entry_fill_price"] or t["entry_price"]
-                pnl = (exit_price - entry_price) * t["shares"] if exit_price else None
-                swing_db.update_trade(
-                    t["id"], status="closed", exited_at=now,
-                    exit_fill_price=exit_price, exit_reason=reason, pnl=pnl,
-                )
+        try:
+            parent = statuses.get(t["ibkr_parent_id"], {})
+            target = statuses.get(t["ibkr_target_id"], {})
+            stop = statuses.get(t["ibkr_stop_id"], {})
+            ledger = swing_db.record_order_fills(t, statuses)
+            filled = max(t.get("filled_shares") or 0, ledger.get("parent", (0, None))[0])
+            if parent.get("status") == "Filled" and not filled:
+                raise RuntimeError("Filled entry has no confirmed quantity")
+            tf = ledger.get("target", (t.get("target_filled") or 0, None))[0]
+            sf = ledger.get("stop", (t.get("stop_filled") or 0, None))[0]
+            tp = ledger.get("target", (0, t.get("target_fill_price")))[1]
+            sp = ledger.get("stop", (0, t.get("stop_fill_price")))[1]
+            entry = parent.get("fill_price") or t.get("entry_fill_price")
+            swing_db.update_trade(t["id"], filled_shares=filled, target_filled=tf, stop_filled=sf,
+                                  target_fill_price=tp, stop_fill_price=sp, entry_fill_price=entry)
+            if not filled:
+                if parent.get("status") in terminal:
+                    for key in ("ibkr_target_id", "ibkr_stop_id"):
+                        if t[key] and not swing_ibkr.cancel_order(t[key]):
+                            raise RuntimeError("Entry ended, but child cancellation is unconfirmed")
+                    swing_db.update_trade(t["id"], status="expired", error=None)
+                elif not parent:
+                    raise RuntimeError("Entry order absent from broker response; not assuming cancellation")
+                continue
+            if not entry:
+                raise RuntimeError("Entry fill price missing")
+            remaining = filled - tf - sf
+            if remaining < 0:
+                raise RuntimeError("Exits exceed confirmed entry fills; reconcile broker position")
+            if remaining == 0:
+                # Confirm every residual order is inactive before closing locally.
+                for key in ("ibkr_parent_id", "ibkr_target_id", "ibkr_stop_id"):
+                    if t[key] and not swing_ibkr.cancel_order(t[key]):
+                        raise RuntimeError("Position exited but residual order cancellation is unconfirmed")
+                fresh = swing_ibkr.fetch_order_statuses([t[k] for k in ("ibkr_parent_id", "ibkr_target_id", "ibkr_stop_id") if t[k]])
+                latest = swing_db.record_order_fills(t, fresh)
+                if (latest.get("parent", (0, None))[0] != filled
+                        or latest.get("target", (0, None))[0] != tf
+                        or latest.get("stop", (0, None))[0] != sf):
+                    raise RuntimeError("Fills changed during cancellation; reconciling again")
+                if (tf and not tp) or (sf and not sp):
+                    raise RuntimeError("Exit price missing")
+                proceeds = tf * (tp or 0) + sf * (sp or 0)
+                swing_db.update_trade(t["id"], status="closed", error=None,
+                    exited_at=target.get("filled_at") or stop.get("filled_at") or swing_db._utcnow(),
+                    exit_fill_price=proceeds / filled,
+                    exit_reason="mixed" if tf and sf else ("target" if tf else "stop"),
+                    pnl=proceeds - filled * entry)
                 updated += 1
-
-    return {"checked": len(trades), "updated": updated}
+                continue
+            if parent.get("status") not in terminal:
+                # Stop the unfilled remainder before resizing protection. Re-read
+                # fills on the next pass so fills racing the cancellation are included.
+                if not swing_ibkr.cancel_order(t["ibkr_parent_id"]):
+                    raise RuntimeError("Partial entry: cancellation not acknowledged")
+                swing_db.update_trade(t["id"], status="partial", error="Reconciling partial entry and protection")
+                updated += 1
+                continue
+            if not parent:
+                raise RuntimeError("Cannot verify that entry has stopped filling")
+            linked = (target.get("oca_group") and target.get("oca_group") == stop.get("oca_group")
+                      and target.get("status") in ("Submitted", "PreSubmitted")
+                      and stop.get("status") in ("Submitted", "PreSubmitted")
+                      and target.get("remaining") == remaining and stop.get("remaining") == remaining)
+            if not linked:
+                # Missing IDs are not evidence an order is gone. Only replace known terminal orders.
+                for key in ("ibkr_target_id", "ibkr_stop_id"):
+                    if t[key] and t[key] not in statuses:
+                        raise RuntimeError("Protective order status missing; refusing duplicate protection")
+                result = swing_ibkr.ensure_exits(t, remaining, lambda fields: swing_db.update_trade(t["id"], **fields))
+                if not result["ok"]:
+                    raise RuntimeError(result["error"])
+            swing_db.update_trade(t["id"], status="open", error=None,
+                                  entered_at=t.get("entered_at") or parent.get("filled_at") or swing_db._utcnow())
+            updated += 1
+        except Exception as exc:
+            swing_db.update_trade(t["id"], status="attention", error=str(exc))
+            errors.append({"id": t["id"], "error": str(exc)})
+    return {"checked": len(trades), "updated": updated, "errors": errors}

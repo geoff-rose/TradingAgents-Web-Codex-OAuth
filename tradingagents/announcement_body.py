@@ -30,6 +30,7 @@ reports what it has done.
 from __future__ import annotations
 
 import io
+import hashlib
 import re
 import sqlite3
 import time
@@ -41,6 +42,13 @@ PDF_URL_RE = re.compile(r'name="pdfURL"\s+value="([^"]+)"')
 
 MAX_PDF_BYTES = 8 * 1024 * 1024      # skip pathological documents
 MAX_TEXT_CHARS = 12_000              # what we keep; see truncation note below
+MIN_TEXT_CHARS = 100
+MAX_FETCH_ATTEMPTS = 4
+RETRY_SECONDS = 900
+
+
+def usable_text(text: str) -> bool:
+    return len(text.strip()) >= MIN_TEXT_CHARS and sum(c.isalpha() for c in text) >= 50
 FETCH_DELAY_SECONDS = 0.5            # be a polite client to ASX
 REQUEST_TIMEOUT = 25.0
 USER_AGENT = "tradingagents-asx-classifier/1.0"
@@ -62,6 +70,14 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), timeout=15.0)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(announcement_bodies)")}
+    for name, declaration in (("attempts", "INTEGER NOT NULL DEFAULT 0"),
+                              ("retry_at", "REAL"), ("truncated", "INTEGER NOT NULL DEFAULT 0")):
+        if name not in have:
+            conn.execute(f"ALTER TABLE announcement_bodies ADD COLUMN {name} {declaration}")
+            if name == "truncated":
+                conn.execute("UPDATE announcement_bodies SET truncated=1 WHERE length(text)>=?", (MAX_TEXT_CHARS,))
+    conn.commit()
     return conn
 
 
@@ -74,13 +90,37 @@ def get_cached(fingerprint: str) -> str | None:
     return None if row is None else (row["text"] or "")
 
 
-def _store(fingerprint: str, text: str, error: str | None) -> None:
+def evidence(fingerprint: str) -> dict[str, Any]:
     with _connect() as conn:
+        row = conn.execute("SELECT * FROM announcement_bodies WHERE fingerprint=?", (fingerprint,)).fetchone()
+    if not row:
+        return {"status": "awaiting_document"}
+    if usable_text(row["text"] or "") and not row["error"]:
+        return {"status": "document_excerpt" if row["truncated"] else "document_read",
+                "sha256": hashlib.sha256(row["text"].encode()).hexdigest(),
+                "truncated": bool(row["truncated"])}
+    return {"status": "document_unavailable" if row["attempts"] >= MAX_FETCH_ATTEMPTS else "awaiting_document",
+            "error": row["error"], "retry_at": row["retry_at"]}
+
+
+def retry_due(fingerprint: str) -> bool:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM announcement_bodies WHERE fingerprint=?", (fingerprint,)).fetchone()
+    if not row or (usable_text(row["text"] or "") and not row["error"]):
+        return True
+    return row["attempts"] < MAX_FETCH_ATTEMPTS and (row["retry_at"] or 0) <= time.time()
+
+
+def _store(fingerprint: str, text: str, error: str | None, truncated: bool = False) -> None:
+    with _connect() as conn:
+        prior = conn.execute("SELECT attempts FROM announcement_bodies WHERE fingerprint=?", (fingerprint,)).fetchone()
+        attempts = (prior[0] if prior else 0) + 1
         conn.execute(
-            "INSERT OR REPLACE INTO announcement_bodies (fingerprint, text, n_chars, fetched_at, error) "
-            "VALUES (?,?,?,?,?)",
+            "INSERT OR REPLACE INTO announcement_bodies (fingerprint, text, n_chars, fetched_at, error, attempts, retry_at, truncated) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (fingerprint, text, len(text or ""),
-             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), error),
+             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), error, attempts,
+             time.time() + RETRY_SECONDS * 2 ** (attempts - 1) if error else None, int(truncated)),
         )
         conn.commit()
 
@@ -88,17 +128,23 @@ def _store(fingerprint: str, text: str, error: str | None) -> None:
 def extract_text(pdf_bytes: bytes) -> str:
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(pdf_bytes))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    pages = []
+    for number, page in enumerate(reader.pages,1):
+        text = page.extract_text() or ""
+        if len(text.strip()) < 20 and len(page.images):
+            raise ValueError(f"Page {number} has unreadable visual content; OCR or review required")
+        pages.append(f"[PAGE {number}]\n{text}")
+    return "\n".join(pages)
 
 
 def fetch_body(fingerprint: str, announcement_url: str,
                client: httpx.Client | None = None) -> str:
-    """Fetch one announcement's text, using the cache. Returns '' on failure --
-    callers fall back to the headline rather than skipping the announcement,
-    because a document we cannot read is not a reason to leave it unscored."""
+    """Return usable document text; failed downloads remain unscored and retry with backoff."""
     cached = get_cached(fingerprint)
-    if cached is not None:
+    if cached and usable_text(cached) and not evidence(fingerprint).get("truncated"):
         return cached
+    if not retry_due(fingerprint):
+        return ""
 
     own_client = client is None
     client = client or httpx.Client(timeout=REQUEST_TIMEOUT,
@@ -112,25 +158,26 @@ def fetch_body(fingerprint: str, announcement_url: str,
         if not pdf_url:
             error = "no pdfURL field in interstitial page"
         else:
-            resp = client.get(pdf_url.group(1))
-            resp.raise_for_status()
-            if len(resp.content) > MAX_PDF_BYTES:
-                error = f"pdf too large ({len(resp.content)} bytes)"
-            else:
-                text = extract_text(resp.content).strip()
+            chunks, size = [], 0
+            with client.stream("GET", pdf_url.group(1)) as resp:
+                resp.raise_for_status()
+                for chunk in resp.iter_bytes():
+                    size += len(chunk)
+                    if size > MAX_PDF_BYTES:
+                        raise ValueError("PDF exceeds download size limit")
+                    chunks.append(chunk)
+            text = extract_text(b"".join(chunks)).strip()
+            if not usable_text(text):
+                error, text = "No usable document text (may require OCR)", ""
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"[:300]
     finally:
         if own_client:
             client.close()
 
-    # Truncation keeps the head of the document deliberately: ASX announcements
-    # front-load the material facts (title, summary, key figures) and tail off
-    # into boilerplate, disclaimers and director bios. Keeping the head is
-    # strictly better than keeping a middle slice.
-    if len(text) > MAX_TEXT_CHARS:
-        text = text[:MAX_TEXT_CHARS]
-    _store(fingerprint, text, error)
+    # Keep every extracted page. Model input size is controlled by reusable
+    # section extraction in ticker_memory, never by discarding the tail.
+    _store(fingerprint, text, error, False)
     time.sleep(FETCH_DELAY_SECONDS)
     return text
 

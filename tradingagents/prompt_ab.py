@@ -61,6 +61,10 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), timeout=20.0)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(ab_scores)")}
+    if "document_sha256" not in have:
+        conn.execute("ALTER TABLE ab_scores ADD COLUMN document_sha256 TEXT")
+        conn.commit()
     return conn
 
 
@@ -133,26 +137,37 @@ def score_under(version: str, session_from: str, session_to: str | None = None,
         with _connect() as db:
             db.executemany(
                 "INSERT OR REPLACE INTO ab_scores"
-                " (fingerprint, version, ticker, score, reason, model, scored_at)"
-                " VALUES (?,?,?,?,?,?,?)", pending)
+                " (fingerprint, version, ticker, score, reason, model, scored_at, document_sha256)"
+                " VALUES (?,?,?,?,?,?,?,?)", pending)
             db.commit()
         pending.clear()
 
     FLUSH_EVERY = 20
+    from .ticker_memory import Budget, prepare, comparison_prompt
+    memory_budget = Budget()
     for r in todo:
+        if memory_budget.remaining <= 0:
+            break
         body = ""
         try:
             from .announcement_body import fetch_body
             body = fetch_body(r["fingerprint"], r["url"]) if r.get("url") else ""
         except Exception:
             pass
+        from .announcement_body import usable_text
+        if not usable_text(body):
+            failed += 1
+            continue
+        prepared = prepare(r, body, memory_budget)
+        if prepared is None:
+            failed += 1
+            continue
         prompt = (f"Ticker: {r['ticker']}\nCompany: {r.get('company') or 'unknown'}\n"
                   f"Headline: {r['headline']}\n"
                   f"Halt: {'yes' if r.get('is_halt') else 'no'}\n"
                   f"Flagged price-sensitive by ASX: "
                   f"{'yes' if r.get('price_sensitive') else 'no'}")
-        if body:
-            prompt += f"\n\nAnnouncement body:\n{body[:20000]}"
+        prompt += comparison_prompt(prepared)
         if version in USES_CONTEXT:
             try:
                 ctx = build_context(r["ticker"], r.get("released_at"))
@@ -168,9 +183,11 @@ def score_under(version: str, session_from: str, session_to: str | None = None,
         except Exception:
             failed += 1
             continue
+        import hashlib
         pending.append((r["fingerprint"], version, r["ticker"], sc,
                         str(parsed.get("reason") or "")[:200],
-                        S._MODEL_LABEL, now))
+                        S._MODEL_LABEL, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        hashlib.sha256(body.encode()).hexdigest()))
         scored += 1
         if len(pending) >= FLUSH_EVERY:
             flush()

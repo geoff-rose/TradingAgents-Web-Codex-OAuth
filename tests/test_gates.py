@@ -77,4 +77,8 @@ for name, r in cases:
 print(f"\n{len(cases)} cases, {fails} incorrect verdicts")
 
 import sys
-sys.exit(1 if fails else 0)
+def test_gate_verdicts():
+    assert fails == 0
+
+if __name__ == "__main__":
+    sys.exit(1 if fails else 0)

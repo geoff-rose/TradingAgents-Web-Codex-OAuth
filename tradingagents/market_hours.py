@@ -6,16 +6,14 @@ middle of a Globex session on 2026-09-07 -- the same bug that had the dashboard
 showing a settlement price as if it were live. It also costs one HTTP request
 per ticker, where this costs nothing.
 
-**Holidays are not handled.** That needs an exchange calendar per market, and
-the failure mode is mild and in the safe direction for a status light: on a
-public holiday the dot says "open" while the market is shut, so a flat quote
-looks unexplained rather than a live quote looking stale. The same limitation
-is documented in `asx_feed.tradeable_session_for`.
+Exchange holidays are handled with `exchange_calendars` (with the published
+clock below as a safe fallback if that package cannot be imported). This keeps
+the light from calling a public holiday an open session.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -28,10 +26,60 @@ CASH_SESSIONS: dict[str, tuple[str, list[tuple[time, time]]]] = {
     "^KS11":     ("Asia/Seoul",     [(time(9, 0), time(15, 30))]),
     "000001.SS": ("Asia/Shanghai",  [(time(9, 30), time(11, 30)), (time(13, 0), time(15, 0))]),
     "^AXJO":     ("Australia/Sydney", [(time(10, 0), time(16, 0))]),
+    "^GSPC":     ("America/New_York", [(time(9, 30), time(16, 0))]),
+    "^IXIC":     ("America/New_York", [(time(9, 30), time(16, 0))]),
+    "^DJI":      ("America/New_York", [(time(9, 30), time(16, 0))]),
 }
 
 _CHICAGO = ZoneInfo("America/Chicago")
 _SYDNEY = ZoneInfo("Australia/Sydney")
+
+# The package carries exchange-specific holidays and lunch breaks that a
+# weekday-only check cannot. Keep the clock tables above as a fallback because
+# the status light must remain non-fatal if a deployment is missing the package.
+_CALENDAR_NAMES = {
+    "^STI": "XSES", "^HSI": "XHKG", "^N225": "XTKS", "^KS11": "XKRX",
+    "000001.SS": "XSHG", "^AXJO": "XASX",
+    "^GSPC": "XNYS", "^IXIC": "XNYS", "^DJI": "XNYS",
+}
+_calendar_cache: dict[str, Any] = {}
+
+
+def _exchange_open(calendar_name: str, now: datetime) -> bool | None:
+    """Return an exchange-calendar answer, or None when unavailable."""
+    try:
+        import exchange_calendars as xc
+        import pandas as pd
+
+        calendar = _calendar_cache.get(calendar_name)
+        if calendar is None:
+            calendar = xc.get_calendar(calendar_name)
+            _calendar_cache[calendar_name] = calendar
+        stamp = pd.Timestamp(now)
+        if stamp.tzinfo is None:
+            stamp = stamp.tz_localize("UTC")
+        else:
+            stamp = stamp.tz_convert("UTC")
+        return bool(calendar.is_open_on_minute(stamp.floor("min"), ignore_breaks=False))
+    except Exception:
+        return None
+
+
+def _asx_session_exists(now: datetime) -> bool | None:
+    """Whether the relevant ASX trading day exists for the SPI session."""
+    try:
+        import exchange_calendars as xc
+
+        calendar = _calendar_cache.get("XASX")
+        if calendar is None:
+            calendar = xc.get_calendar("XASX")
+            _calendar_cache["XASX"] = calendar
+        local = now.astimezone(_SYDNEY)
+        session_day = (local.date() - timedelta(days=1)
+                       if local.time() < time(7, 0) else local.date())
+        return bool(calendar.is_session(session_day))
+    except Exception:
+        return None
 
 
 def _cme_open(now: datetime) -> bool:
@@ -45,7 +93,12 @@ def _cme_open(now: datetime) -> bool:
         return False
     if wd == 4 and t.time() >= time(16, 0):  # Friday after the close
         return False
-    return not (time(16, 0) <= t.time() < time(17, 0))   # daily halt
+    if time(16, 0) <= t.time() < time(17, 0):             # daily halt
+        return False
+    # CMES supplies holidays and special closes; the manual clock above keeps
+    # the one-hour Globex maintenance break explicit.
+    exchange_answer = _exchange_open("CMES", now)
+    return True if exchange_answer is None else exchange_answer
 
 
 def _spi_open(now: datetime) -> bool:
@@ -53,13 +106,17 @@ def _spi_open(now: datetime) -> bool:
     through 07:00 the following morning, Monday to Friday."""
     t = now.astimezone(_SYDNEY)
     wd, clock = t.weekday(), t.time()
+    manual = False
     if wd < 5 and time(9, 50) <= clock < time(16, 30):
-        return True
-    if wd < 5 and clock >= time(17, 10):          # night session opens
-        return True
-    if wd in (1, 2, 3, 4, 5) and clock < time(7, 0):  # night session continues
-        return True
-    return False
+        manual = True
+    elif wd < 5 and clock >= time(17, 10):          # night session opens
+        manual = True
+    elif wd in (1, 2, 3, 4, 5) and clock < time(7, 0):  # night continues
+        manual = True
+    if not manual:
+        return False
+    exchange_answer = _asx_session_exists(now)
+    return True if exchange_answer is None else exchange_answer
 
 
 def is_open(symbol: str, now: datetime | None = None) -> bool | None:
@@ -73,6 +130,9 @@ def is_open(symbol: str, now: datetime | None = None) -> bool | None:
     sched = CASH_SESSIONS.get(symbol)
     if not sched:
         return None
+    exchange_answer = _exchange_open(_CALENDAR_NAMES[symbol], now)
+    if exchange_answer is not None:
+        return exchange_answer
     tzname, ranges = sched
     local = now.astimezone(ZoneInfo(tzname))
     if local.weekday() >= 5:

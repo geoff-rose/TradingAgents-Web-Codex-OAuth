@@ -31,6 +31,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+YFINANCE_TIMEOUT_SECONDS = 30
+
 from tradingagents.swing_signal import (
     ATR_PERIOD, MAX_GAIN_PCT, MIN_GAIN_PCT, PULLBACK_BAND_PCT,
     PULLBACK_LOOKBACK, SMA_PERIOD, STOP_ATR_MULT, TARGET_ATR_MULT,
@@ -118,7 +120,7 @@ def fetch_daily_history(ticker: str, period: str = "10y", market: str = "AU") ->
     computation must use adjusted, never raw, or split/dividend dates
     produce silently wrong entry levels."""
     symbol = f"{ticker}.AX" if market == "AU" else ticker
-    df = yf.Ticker(symbol).history(period=period)
+    df = yf.Ticker(symbol).history(period=period, timeout=YFINANCE_TIMEOUT_SECONDS)
     if df.empty:
         return df
     df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
