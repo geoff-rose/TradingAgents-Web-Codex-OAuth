@@ -107,6 +107,8 @@ _REPORT_FIELDS = [
     ("final_trade_decision",  "Decision"),
     ("market_report",         "Market"),
     ("sentiment_report",      "Sentiment"),
+    "/api/recommendations/generate",
+    "/api/setups/scan", "/api/setups/resolve", "/api/setups/backfill",
     ("news_report",           "News"),
     ("fundamentals_report",   "Fundamentals"),
     ("short_interest_report", "Short Interest"),
@@ -1135,6 +1137,11 @@ async def scanner_scan(force: bool = False):
 
 
 class MomentumOpenRequest(BaseModel):
+@app.get("/setups", response_class=HTMLResponse)
+async def setups_page():
+    return HTMLResponse((static_dir / "setups.html").read_text())
+
+
     ticker: str
     entry_price: float
     dollars: float = 5000.0
@@ -1313,6 +1320,72 @@ async def scanner_finalize():
     close), but also callable by hand -- running it mid-session just
     re-stamps "last traded so far" harmlessly."""
     from tradingagents.mover_log import finalize_today
+# ---------------------------------------------------------------------------
+# /setups -- end-of-day technical setup scanner (tradingagents/ta_setups.py)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/setups/scan")
+async def setups_scan(limit: int = 300, store: bool = False, force: bool = False):
+    """Detect setups on today's provisional bar. `store=true` is what the
+    15:40 timer calls; the page only ever reads the stored run."""
+    from tradingagents.ta_setups import scan
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: scan(
+        limit=limit, store=store, force=force))
+
+
+@app.get("/api/setups/latest")
+async def setups_latest(scan_date: str | None = None):
+    from tradingagents.ta_setups import latest_stored
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: latest_stored(scan_date))
+
+
+@app.post("/api/setups/resolve")
+async def setups_resolve(days_back: int = 40):
+    from tradingagents.ta_setups import resolve
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: resolve(days_back=days_back))
+
+
+@app.get("/api/setups/scorecard")
+async def setups_scorecard():
+    from tradingagents.ta_setups import scorecard
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, scorecard)
+
+
+@app.get("/api/setups/history")
+async def setups_history(days: int = 30, setup_id: str | None = None):
+    from tradingagents.ta_setups import history
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: history(days=days, setup_id=setup_id))
+
+
+@app.get("/api/setups/catalogue")
+async def setups_catalogue():
+    from tradingagents.ta_setups import catalogue
+    return catalogue()
+
+
+@app.post("/api/setups/backfill")
+async def setups_backfill(period: str = "3y", limit: int = 300, run_gates: bool = True):
+    """One-off historical baseline. Minutes, not seconds: runs on the
+    single-worker executor so it cannot crowd the scheduled scans."""
+    from tradingagents.ta_setups import backfill
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_recommendations_executor, lambda: backfill(
+        period=period, limit=limit, store=True, run_gates=run_gates))
+
+
+@app.get("/api/eod/latest")
+async def eod_latest(scan_date: str | None = None):
+    """Return the frozen scheduled EOD scan without re-fetching 500 tickers."""
+    from tradingagents.eod_volume import latest_stored_scan
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, latest_stored_scan, scan_date)
+
+
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, finalize_today)
 

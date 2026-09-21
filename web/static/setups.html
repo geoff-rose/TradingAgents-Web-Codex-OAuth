@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TechA — TradingAgents</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #1e1e24;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #388bfd;
+    --buy:      #22c55e;
+    --sell:     #ef4444;
+    --hold:     #f59e0b;
+    --header-h: 53px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 14px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: var(--header-h); gap: 24px; }
+  .logo { font-weight: 700; font-size: 17px; letter-spacing: -0.5px; color: var(--text); text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 11px; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+  nav a:hover, nav a.active { background: var(--surface2); color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 6px 12px; font-size: 12px; cursor: pointer; text-decoration: none; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 18px; line-height: 1.5; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 18px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 10px; font-weight: 600; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.55; }
+  .error { color: var(--sell); font-size: 13px; padding: 10px 0; }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+  .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .pill.long  { background: rgba(34,197,94,.12); color: var(--buy); border-color: rgba(34,197,94,.35); }
+  .pill.short { background: rgba(239,68,68,.12); color: var(--sell); border-color: rgba(239,68,68,.35); }
+  .pill.confirmed { background: rgba(56,139,253,.15); color: var(--accent); border-color: rgba(56,139,253,.4); }
+  .pill.forming { background: rgba(245,158,11,.13); color: var(--hold); border-color: rgba(245,158,11,.4); }
+  .pill.insufficient { color: var(--muted); }
+  .pill.noedge { color: var(--muted); border-style: dashed; }
+  .pill.negative { background: rgba(239,68,68,.12); color: var(--sell); border-color: rgba(239,68,68,.35); }
+  .pill.watch { background: rgba(245,158,11,.13); color: var(--hold); border-color: rgba(245,158,11,.4); }
+  .pill.edge { background: rgba(34,197,94,.12); color: var(--buy); border-color: rgba(34,197,94,.35); }
+  .pill.survived { background: rgba(34,197,94,.12); color: var(--buy); }
+  .pill.rejected { background: rgba(239,68,68,.12); color: var(--sell); }
+  .pill.inconclusive { color: var(--hold); }
+  .tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .tile { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; min-width: 120px; }
+  .tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
+  .tile .value { font-size: 17px; font-weight: 700; }
+  .tile .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text); }
+  th .sort-arrow { opacity: .4; font-size: 10px; margin-left: 2px; }
+  th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+  tr:hover td { background: var(--surface2); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--buy); } .neg { color: var(--sell); } .neu { color: var(--muted); }
+  .tk { font-weight: 600; }
+  .co { color: var(--muted); font-size: 11px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
+  .ctx { color: var(--muted); font-size: 11px; }
+  select, input[type=text] { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .rule { font-size: 12px; color: var(--muted); line-height: 1.5; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .rule b { color: var(--text); }
+  .warn-box { border-left: 3px solid var(--hold); padding: 8px 12px; background: rgba(245,158,11,.06); font-size: 12px; color: var(--muted); line-height: 1.55; }
+  ul.caveats { padding-left: 18px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  ul.caveats li { margin-bottom: 4px; }
+  .rec { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <a href="/" class="logo">asxagents<span style="color:#a78bfa">.app</span></a>
+  <nav>
+    <a id="analysis-nav-link" href="/analysis" style="display:none">Run Analysis</a>
+    <a id="reports-nav-link" href="/reports" style="display:none">Reports</a>
+    <a href="/performance">Performance</a>
+    <a href="/asx">ASX</a>
+    <a href="/recommendations">Morning Picks</a>
+    <a href="/research">Patterns</a>
+    <a href="/swing">Swing</a>
+    <a href="/backtest">Backtest</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/setups" class="active">TechA</a>
+    <a href="/watchlist">Watchlist</a>
+    <a id="sync-nav-link" href="/sync" style="display:none">Sync</a>
+  </nav>
+  <div class="nav-right">
+    <a id="logout-nav-link" href="/api/logout" class="btn" style="display:none">Logout</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <h1>TechA</h1>
+  <div class="subtitle">
+    Technical setups across the ASX 300 (top 300 by market cap), scanned at 15:40 Sydney each
+    trading day — before the closing auction, so a setup seen here can still be acted on at the
+    close. Every detection is logged and measured against a same-day equal-weight control; the
+    badges say how much evidence each setup has accumulated. Nothing on this page is a buy signal.
+  </div>
+
+  <div class="card" id="status-card">
+    <div class="bar" id="status-bar"><span class="note">Loading…</span></div>
+    <div class="tiles" id="status-tiles"></div>
+    <div class="note" id="status-note"></div>
+  </div>
+
+  <div class="card">
+    <h2>Today's setups — tier 1 (indicator-defined)</h2>
+    <div class="bar">
+      <select id="f-setup"><option value="">All setups</option></select>
+      <select id="f-dir"><option value="">Long &amp; short</option><option value="1">Long</option><option value="-1">Short</option></select>
+      <select id="f-state"><option value="">Forming &amp; confirmed</option><option value="forming">Forming</option><option value="confirmed">Confirmed</option></select>
+      <input type="text" id="f-ticker" placeholder="ticker" style="width:90px">
+      <span class="note" id="t1-count"></span>
+    </div>
+    <div class="scroll"><table id="t1"><thead></thead><tbody id="t1-body"></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Today's setups — tier 2 (geometric, unvalidated)</h2>
+    <div class="note" style="margin-bottom:8px">Swing-pivot shapes with hand-set tolerances. Shown for what they are: a pattern the eye would call, with no evidence behind it until the record below says otherwise.</div>
+    <div class="scroll"><table id="t2"><thead></thead><tbody id="t2-body"></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Scorecard — live record vs baseline, per setup and state</h2>
+    <div class="note" id="sc-note" style="margin-bottom:8px"></div>
+    <div class="scroll"><table id="sc"><thead>
+      <tr>
+        <th>Setup</th><th>State</th><th>Dir</th>
+        <th class="num" title="Live detections resolved to 5 sessions, first in a 5-session window">Live n</th>
+        <th class="num">Dates</th>
+        <th class="num" title="Direction-signed mean 5-session return minus the equal-weight universe the same day">Excess 5d</th>
+        <th class="num" title="Direction-signed median 5-session return (raw, not vs control)">Median 5d</th>
+        <th class="num" title="Share of the cell's total gain that sits in its best 5% of trades. Above 100% means the other 95% lose money on average.">Top-5% share</th>
+        <th class="num">Excess 10d</th>
+        <th class="num" title="Share of detections beating the control at 5 sessions">Hit</th>
+        <th class="num" title="t-stat on date-clustered means">t (5d)</th>
+        <th title="Of live detections, share where the completed bar still showed this state / share upgraded to confirmed">At close</th>
+        <th class="num" title="Historical backfill on completed bars, today's top-300 applied backwards">Base n</th>
+        <th class="num">Base excess 5d</th>
+        <th class="num" title="Baseline median 5-session return">Base median</th>
+        <th class="num" title="Baseline: share of total gain in the best 5% of trades">Base top-5%</th>
+        <th class="num">Base t</th>
+        <th>Gate verdict</th>
+        <th>Badge</th>
+      </tr></thead><tbody id="sc-body"></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent detections (30 days) with outcomes</h2>
+    <div class="bar">
+      <select id="h-setup"><option value="">All setups</option></select>
+      <span class="note" id="h-count"></span>
+    </div>
+    <div class="scroll"><table id="hist"><thead></thead><tbody id="hist-body"></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Caveats</h2>
+    <ul class="caveats" id="caveats"></ul>
+  </div>
+
+  <div class="card">
+    <details><summary>Rule catalogue — what each setup means exactly</summary>
+      <div id="catalogue" style="margin-top:8px"></div>
+    </details>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function pct(v, d = 2) { if (v == null || !Number.isFinite(Number(v))) return '<span class="neu">—</span>'; const n = Number(v); return `<span class="${n > 0 ? 'pos' : n < 0 ? 'neg' : 'neu'}">${n > 0 ? '+' : ''}${n.toFixed(d)}%</span>`; }
+function num(v, d = 2) { return v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(d); }
+function fmtPx(v) { if (v == null) return '—'; const n = Number(v); return n.toFixed(n < 1 ? 3 : 2); }
+function dirPill(d) { return d > 0 ? '<span class="pill long">long</span>' : '<span class="pill short">short</span>'; }
+function statePill(s) { return `<span class="pill ${escapeHtml(s)}">${escapeHtml(s)}</span>`; }
+function badgePill(b) { const cls = b === 'no edge' ? 'noedge' : b.startsWith('edge') ? 'edge' : b; return `<span class="pill ${cls}">${escapeHtml(b)}</span>`; }
+function tailShare(share, exTail) {
+  if (share == null) return '<span class="neu">—</span>';
+  const p = share * 100; const cls = p > 100 ? 'neg' : p > 60 ? 'neu' : 'pos';
+  const tip = exTail == null ? '' : ` title="mean without the top 5%: ${exTail > 0 ? '+' : ''}${exTail.toFixed(2)}%"`;
+  return `<span class="${cls}"${tip}>${p.toFixed(0)}%</span>`;
+}
+function verdictPill(v) { return v ? `<span class="pill ${escapeHtml(v)}">${escapeHtml(v)}</span>` : '<span class="neu">—</span>'; }
+function yfLink(t) { return `<a class="tk" style="color:var(--text);text-decoration:none" target="_blank" rel="noopener" href="https://finance.yahoo.com/quote/${encodeURIComponent(t)}.AX/">${escapeHtml(t)}</a>`; }
+
+fetch('/api/auth/status').then(r => r.json()).then(a => {
+  if (a && a.authenticated) ['analysis', 'reports', 'sync', 'logout'].forEach(k => {
+    const el = document.getElementById(k + '-nav-link'); if (el) el.style.display = '';
+  });
+}).catch(() => {});
+
+let LATEST = null, SCORE = null, CAT = null, HIST = null;
+const RECORD = {};   // setup_id|state -> live cell
+
+// ── sortable tables ───────────────────────────────────────────────────────
+const SORT = { t1: { key: 'setup_id', dir: 1 }, t2: { key: 'setup_id', dir: 1 }, hist: { key: 'scan_date', dir: -1 } };
+const COLS = {
+  t1: [
+    ['ticker', 'Ticker', r => r.ticker], ['setup_id', 'Setup', r => r.label], ['direction', 'Dir', r => r.direction],
+    ['state', 'State', r => r.state], ['price', 'Price', r => r.price], ['level', 'Level', r => r.level],
+    ['distance_pct', 'To level', r => r.distance_pct], ['rsi', 'RSI', r => r.context?.rsi],
+    ['vol_ratio', 'Vol×', r => r.context?.vol_ratio], ['atr_pct', 'ATR %', r => r.context?.atr_pct],
+    ['record', 'Live record', r => RECORD[r.setup_id + '|' + r.state]?.excess_5d ?? -999],
+  ],
+  t2: [
+    ['ticker', 'Ticker', r => r.ticker], ['setup_id', 'Pattern', r => r.label], ['direction', 'Dir', r => r.direction],
+    ['state', 'State', r => r.state], ['price', 'Price', r => r.price], ['level', 'Level', r => r.level],
+    ['distance_pct', 'To level', r => r.distance_pct], ['vol_ratio', 'Vol×', r => r.context?.vol_ratio],
+    ['ctx', 'Pivots', r => JSON.stringify(r.context)], ['record', 'Live record', r => RECORD[r.setup_id + '|' + r.state]?.excess_5d ?? -999],
+  ],
+  hist: [
+    ['scan_date', 'Date', r => r.scan_date], ['ticker', 'Ticker', r => r.ticker], ['setup_id', 'Setup', r => r.label],
+    ['direction', 'Dir', r => r.direction], ['state', 'State', r => r.state], ['price', 'At scan', r => r.price],
+    ['close_eod', 'Close', r => r.close_eod], ['state_at_close', 'At close', r => r.state_at_close],
+    ['fwd_1d_pct', '1d', r => r.fwd_1d_pct], ['fwd_5d_pct', '5d', r => r.fwd_5d_pct],
+    ['ex5', 'Excess 5d', r => excess(r, 5)], ['fwd_10d_pct', '10d', r => r.fwd_10d_pct], ['fwd_20d_pct', '20d', r => r.fwd_20d_pct],
+    ['first_in_window', 'First', r => r.first_in_window],
+  ],
+};
+function excess(r, h) { const f = r[`fwd_${h}d_pct`], c = r[`ew_fwd_${h}d_pct`]; return (f == null || c == null) ? null : r.direction * (f - c); }
+function thead(id) {
+  const s = SORT[id];
+  return '<tr>' + COLS[id].map(([k, label]) => `<th class="sortable${s.key === k ? ' sorted' : ''}" data-t="${id}" data-k="${k}">${label}<span class="sort-arrow">${s.key === k ? (s.dir > 0 ? '▲' : '▼') : '↕'}</span></th>`).join('') + '</tr>';
+}
+function sorted(id, rows) {
+  const s = SORT[id]; const ex = COLS[id].find(c => c[0] === s.key)?.[2] || (r => r[s.key]);
+  return rows.slice().sort((a, b) => { const x = ex(a), y = ex(b); if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * s.dir; });
+}
+document.addEventListener('click', e => {
+  const th = e.target.closest('th.sortable'); if (!th) return;
+  const id = th.dataset.t, k = th.dataset.k; const s = SORT[id];
+  if (s.key === k) s.dir = -s.dir; else { s.key = k; s.dir = k === 'scan_date' ? -1 : 1; }
+  if (id === 'hist') renderHist(); else renderToday();
+});
+
+// ── status + today ────────────────────────────────────────────────────────
+function recordChip(sid, st) {
+  const c = RECORD[sid + '|' + st]; if (!c) return '<span class="rec">—</span>';
+  return `<span class="rec">n=${c.n} · ${c.excess_5d == null ? '—' : (c.excess_5d > 0 ? '+' : '') + c.excess_5d.toFixed(2) + '%'}</span> ${badgePill(c.badge)}`;
+}
+function renderStatus() {
+  const bar = $('#status-bar'), tiles = $('#status-tiles'), note = $('#status-note');
+  if (!LATEST || !LATEST.available) {
+    bar.innerHTML = '<span class="note">No stored scan yet. The first runs at 15:40 Sydney on the next trading day (<code>asx-ta-setups.timer</code>).</span>';
+    tiles.innerHTML = ''; note.innerHTML = ''; return;
+  }
+  const r = LATEST.run;
+  const src = r.bar_source === 'daily_partial' ? 'yfinance daily row, provisional' : r.bar_source === 'mixed' ? 'daily row, some rebuilt from hourly bars' : r.bar_source;
+  bar.innerHTML = `<span class="pill">scan ${escapeHtml(r.scan_date)} · ${escapeHtml(r.sydney_time || '')} Sydney</span>`
+    + `<span class="pill ${r.bar_provisional ? 'forming' : ''}">${r.bar_provisional ? 'provisional bar' : 'completed bar'}</span>`
+    + `<span class="pill">${escapeHtml(src)}</span>`
+    + `<span class="note">${r.elapsed_s != null ? r.elapsed_s + 's' : ''}</span>`;
+  tiles.innerHTML = [
+    ['Universe', r.n_universe, 'top by market cap'], ['With today\'s bar', r.n_today_bar, `of ${r.n_with_data} with data`],
+    ['Liquid', r.n_liquid, 'price ≥ $1, turnover ≥ $500k'], ['Detections', r.n_detections, `${r.n_tier1} tier 1 · ${r.n_tier2} tier 2`],
+    ['Volume scale', r.vol_scale != null ? Number(r.vol_scale).toFixed(2) : '—', (r.vol_scale_sessions || 0) >= 10 ? 'measured' : 'seed until 10 sessions resolve'],
+  ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v ?? '—'}</div><div class="sub">${s}</div></div>`).join('');
+  note.innerHTML = 'Prices are as of roughly 15:20 Sydney — yfinance runs about 20 minutes behind — and today\'s bar excludes the closing auction. A setup that reads <em>forming</em> here may already be confirmed in the market, and the completed bar can differ; the scorecard\'s "at close" column measures how often it did.';
+}
+function renderToday() {
+  const rows = (LATEST && LATEST.detections) || [];
+  const fs = $('#f-setup').value, fd = $('#f-dir').value, fst = $('#f-state').value, ft = $('#f-ticker').value.trim().toUpperCase();
+  const keep = r => (!fs || r.setup_id === fs) && (!fd || String(r.direction) === fd) && (!fst || r.state === fst) && (!ft || r.ticker.includes(ft));
+  const t1 = sorted('t1', rows.filter(r => r.tier === 1 && keep(r)));
+  const t2 = sorted('t2', rows.filter(r => r.tier === 2 && keep(r)));
+  $('#t1 thead').innerHTML = thead('t1'); $('#t2 thead').innerHTML = thead('t2');
+  $('#t1-count').textContent = `${t1.length} shown`;
+  const row1 = r => `<tr>
+    <td>${yfLink(r.ticker)} <span class="co">${escapeHtml(r.company || '')}</span></td>
+    <td>${escapeHtml(r.label)}</td><td>${dirPill(r.direction)}</td><td>${statePill(r.state)}</td>
+    <td class="num">${fmtPx(r.price)}</td>
+    <td class="num" title="${escapeHtml(r.level_kind || '')}">${fmtPx(r.level)}</td>
+    <td class="num">${pct(r.distance_pct)}</td>
+    <td class="num">${num(r.context?.rsi, 0)}</td>
+    <td class="num">${num(r.context?.vol_ratio, 1)}</td>
+    <td class="num">${num(r.context?.atr_pct, 1)}</td>
+    <td>${recordChip(r.setup_id, r.state)}</td></tr>`;
+  const row2 = r => {
+    const c = r.context || {}; const bits = [];
+    for (const k of ['low1', 'low2', 'high1', 'high2', 'first_high', 'last_low', 'pole_top']) if (c[k]) bits.push(`${k} ${c[k]}`);
+    if (c.pole_pct != null) bits.push(`pole +${c.pole_pct}%`); if (c.flag_bars != null) bits.push(`${c.flag_bars} flag bars`);
+    if (c.n_highs != null) bits.push(`${c.n_highs} highs`);
+    return `<tr>
+    <td>${yfLink(r.ticker)} <span class="co">${escapeHtml(r.company || '')}</span></td>
+    <td>${escapeHtml(r.label)}</td><td>${dirPill(r.direction)}</td><td>${statePill(r.state)}</td>
+    <td class="num">${fmtPx(r.price)}</td>
+    <td class="num" title="${escapeHtml(r.level_kind || '')}">${fmtPx(r.level)}</td>
+    <td class="num">${pct(r.distance_pct)}</td>
+    <td class="num">${num(c.vol_ratio, 1)}</td>
+    <td class="ctx">${escapeHtml(bits.join(' · '))}</td>
+    <td>${recordChip(r.setup_id, r.state)}</td></tr>`;
+  };
+  $('#t1-body').innerHTML = t1.length ? t1.map(row1).join('') : `<tr><td colspan="11" class="empty">${LATEST && LATEST.available ? 'No tier-1 setups match.' : 'No scan stored yet.'}</td></tr>`;
+  $('#t2-body').innerHTML = t2.length ? t2.map(row2).join('') : `<tr><td colspan="10" class="empty">${LATEST && LATEST.available ? 'No geometric patterns today.' : 'No scan stored yet.'}</td></tr>`;
+}
+
+// ── scorecard ─────────────────────────────────────────────────────────────
+function renderScore() {
+  if (!SCORE) return;
+  for (const c of SCORE.cells) RECORD[c.setup_id + '|' + c.state] = { n: c.live.n, excess_5d: c.live.excess_5d, badge: c.badge };
+  $('#sc-note').innerHTML = `${SCORE.n_cells} setup×state cells are tracked, so about ${SCORE.expected_false_positives} would clear |t| &gt; 2 by chance alone. ` +
+    `<em>Top-5% share</em> is how much of a cell's total gain sits in its best 5% of trades: above 100% means the other 95% lose on average, so the mean is a tail, not a tendency. ` +
+    `A badge needs ${SCORE.thresholds.min_dates_live} distinct dates before it says anything, and ${SCORE.thresholds.min_dates_edge} plus a surviving baseline before it says <em>edge</em> — and even then "unvalidated" stays in the name. ` +
+    `Volume scale for the provisional bar: ${Number(SCORE.vol_scale).toFixed(2)} (${SCORE.vol_scale_sessions} sessions measured).`;
+  const rows = SCORE.cells.map(c => {
+    const b = c.baseline || {}; const cc = c.close_check || {};
+    const atClose = cc.n ? `${(cc.same_rate * 100).toFixed(0)}% held` + (c.state === 'forming' && cc.confirmed_rate != null ? ` · ${(cc.confirmed_rate * 100).toFixed(0)}% confirmed` : '') + ` <span class="rec">(n=${cc.n})</span>` : '<span class="neu">—</span>';
+    return `<tr>
+      <td>${escapeHtml(c.label)} <span class="rec">t${c.tier}</span></td><td>${statePill(c.state)}</td><td>${dirPill(c.direction)}</td>
+      <td class="num">${c.live.n}</td><td class="num">${c.live.n_dates}</td>
+      <td class="num">${pct(c.live.excess_5d)}</td>
+      <td class="num">${pct(c.live.median_5d)}</td><td class="num">${tailShare(c.live.tail_share_5d, c.live.mean_ex_tail_5d)}</td>
+      <td class="num">${pct(c.live.excess_10d)}</td>
+      <td class="num">${c.live.hit_rate_5d == null ? '—' : (c.live.hit_rate_5d * 100).toFixed(0) + '%'}</td>
+      <td class="num">${num(c.live.t_5d, 1)}</td>
+      <td>${atClose}</td>
+      <td class="num">${b.n ?? '—'}</td><td class="num">${pct(b.excess_5d)}</td>
+      <td class="num">${pct(b.median_5d)}</td><td class="num">${tailShare(b.tail_share_5d, b.mean_ex_tail_5d)}</td>
+      <td class="num">${num(b.t_5d, 1)}</td>
+      <td>${verdictPill(b.verdict)}${b.killed_by ? ` <span class="rec">${escapeHtml(b.killed_by)}</span>` : ''}${b.blocked_by ? ` <span class="rec">blocked: ${escapeHtml(b.blocked_by)}</span>` : ''}</td>
+      <td>${badgePill(c.badge)}</td></tr>`;
+  });
+  $('#sc-body').innerHTML = rows.join('');
+}
+
+// ── history ───────────────────────────────────────────────────────────────
+function renderHist() {
+  if (!HIST) return;
+  const fs = $('#h-setup').value;
+  const rows = sorted('hist', HIST.rows.filter(r => !fs || r.setup_id === fs));
+  $('#hist thead').innerHTML = thead('hist');
+  $('#h-count').textContent = `${rows.length} detections since ${HIST.since}`;
+  $('#hist-body').innerHTML = rows.length ? rows.map(r => `<tr>
+    <td>${escapeHtml(r.scan_date)}</td><td>${yfLink(r.ticker)}</td><td>${escapeHtml(r.label)}</td>
+    <td>${dirPill(r.direction)}</td><td>${statePill(r.state)}</td>
+    <td class="num">${fmtPx(r.price)}</td><td class="num">${fmtPx(r.close_eod)}</td>
+    <td>${r.state_at_close ? (r.state_at_close === r.state ? statePill(r.state_at_close) : `<span class="pill">${escapeHtml(r.state_at_close)}</span>`) : '<span class="neu">pending</span>'}</td>
+    <td class="num">${pct(r.fwd_1d_pct)}</td><td class="num">${pct(r.fwd_5d_pct)}</td>
+    <td class="num">${pct(excess(r, 5))}</td>
+    <td class="num">${pct(r.fwd_10d_pct)}</td><td class="num">${pct(r.fwd_20d_pct)}</td>
+    <td>${r.first_in_window ? '' : '<span class="rec" title="same setup fired within the prior 5 sessions; excluded from the scorecard">repeat</span>'}</td>
+  </tr>`).join('') : '<tr><td colspan="14" class="empty">Nothing yet.</td></tr>';
+}
+
+// ── catalogue + caveats ───────────────────────────────────────────────────
+function renderCatalogue() {
+  if (!CAT) return;
+  const opts = CAT.setups.map(s => `<option value="${s.id}">${escapeHtml(s.label)}</option>`).join('');
+  $('#f-setup').insertAdjacentHTML('beforeend', opts); $('#h-setup').insertAdjacentHTML('beforeend', opts);
+  $('#catalogue').innerHTML = CAT.setups.map(s => `<div class="rule"><b>${escapeHtml(s.label)}</b> <span class="rec">tier ${s.tier} · ${s.direction > 0 ? 'long' : 'short'} · level: ${escapeHtml(s.level_kind)}</span><br>${escapeHtml(s.rule)}</div>`).join('');
+}
+function renderCaveats() {
+  $('#caveats').innerHTML = [
+    '<b>Provisional bar.</b> The 15:40 scan sees a bar that ends around 15:20 and has no closing auction in it. The completed bar can differ; "at close" in the scorecard is the measured rate.',
+    '<b>Live and baseline are not the same test.</b> The baseline runs on completed bars, which the live scan never sees. Treat the live record as the only faithful one; the baseline is context.',
+    '<b>Survivorship in the baseline.</b> Today\'s top 300 applied backwards. Names that fell out of the top 300 are missing from history, which flatters long-side momentum setups in particular.',
+    '<b>Multiple testing.</b> Two-dozen-odd cells are tracked; roughly one clears a 2-sigma bar by chance. The gate harness\'s multiple-testing check and the badge thresholds both account for this, but a single green cell is not a finding.',
+    '<b>Volume scale is measured, then applied.</b> The fraction of a day\'s volume traded by the scan is learned from resolved sessions (seed 0.6). Until ten have resolved, volume-gated setups are slightly mis-calibrated.',
+    '<b>Tier 2 is unvalidated by construction.</b> Geometric tolerances are fixed by hand, not fitted; the patterns are shown because a chart-reader would call them, not because they are known to work.',
+    '<b>Control is equal-weight, same day.</b> Excess is against the mean forward return of every liquid ticker on that date, so a setup only gets credit for beating the tape it fired into. The sector index is the second benchmark, used by the gates.',
+    '<b>Liquidity filter.</b> Median close ≥ $1 and median turnover ≥ $500k/day, the same as every other module here. A handful of sub-$1 ASX 300 names are excluded; tick-size bounce below $1 produces fake edges.',
+  ].map(t => `<li>${t}</li>`).join('');
+}
+
+// ── load ──────────────────────────────────────────────────────────────────
+async function j(url) { const r = await fetch(url); if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.json(); }
+async function load() {
+  try {
+    [CAT, SCORE] = await Promise.all([j('/api/setups/catalogue'), j('/api/setups/scorecard')]);
+    renderCatalogue(); renderScore(); renderCaveats();
+    LATEST = await j('/api/setups/latest');
+    renderStatus(); renderToday();
+    HIST = await j('/api/setups/history?days=30');
+    renderHist();
+  } catch (e) {
+    $('#status-bar').innerHTML = `<span class="error">Failed to load: ${escapeHtml(e.message)}</span>`;
+  }
+}
+['#f-setup', '#f-dir', '#f-state'].forEach(s => $(s).addEventListener('change', renderToday));
+$('#f-ticker').addEventListener('input', renderToday);
+$('#h-setup').addEventListener('change', renderHist);
+load();
+</script>
+</body>
+</html>

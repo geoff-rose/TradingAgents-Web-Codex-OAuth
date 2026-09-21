@@ -160,9 +160,9 @@ def _spi200_ibkr() -> tuple[float | None, float | None]:
             Future(symbol="SPI", exchange="SNFE", currency="AUD"))
         if not details:
             return None, None
-        # front month = nearest expiry still ahead of us
-        front = sorted(details,
-                       key=lambda d: d.contract.lastTradeDateOrContractMonth)[0].contract
+        # front month = nearest expiry still ahead of us; IBKR includes the
+        # just-expired contract in an unqualified chain request.
+        front = _active_front_contract(details)
         ib.reqMarketDataType(4)          # delayed-frozen; no real-time ASX subscription
         tk = ib.reqMktData(front, "", True, False)
         for _ in range(24):
@@ -236,9 +236,7 @@ def refresh_futures() -> dict[str, Any]:
                     Future(symbol=sym, exchange=exch, currency=ccy))
                 if not details:
                     continue
-                front = sorted(
-                    details,
-                    key=lambda d: d.contract.lastTradeDateOrContractMonth)[0].contract
+                front = _active_front_contract(details)
                 tk = ib.reqMktData(front, "", True, False)
                 for _ in range(20):
                     ib.sleep(0.5)
@@ -251,6 +249,39 @@ def refresh_futures() -> dict[str, Any]:
                     continue
                 out[snap_sym] = {
                     "last": last, "previous_close": prev,
+def _active_front_contract(details):
+    """Choose the nearest contract whose expiry has not passed in Sydney.
+
+    IBKR returns expired contracts alongside the current chain when a Future
+    is requested without an expiry.  Sorting the chain alone therefore picked
+    APU6 on 2026-09-18 Sydney time: its recorded expiry was 2026-09-17, so the
+    market-data request returned no last price and AP*0 silently disappeared
+    from the cache.
+
+    Prefer the quarterly cycle (Mar/Jun/Sep/Dec).  SPI also lists serial
+    months, and the day after APU6 expired the nearest unexpired contract was
+    APV6 (October): 33 contracts traded, no last print, so the refresh dropped
+    SPI again (2026-09-18).  The quarterly APZ6 had 25k volume the same
+    minute.  ES/NQ list quarterlies only, so this is a no-op for them.
+    """
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo("Australia/Sydney")).date()
+    active = []
+    for detail in details:
+        raw = str(detail.contract.lastTradeDateOrContractMonth or "")
+        try:
+            expiry = datetime.strptime(raw[:8], "%Y%m%d").date()
+        except ValueError:
+            expiry = None
+        if expiry is None or expiry >= today:
+            active.append((detail, expiry))
+    quarterly = [d for d, e in active if e is not None and e.month in (3, 6, 9, 12)]
+    pool = quarterly or [d for d, _ in active] or list(details)
+    return sorted(pool,
+                  key=lambda d: d.contract.lastTradeDateOrContractMonth)[0].contract
+
+
                     "change_pct": ((last - prev) / prev * 100
                                    if prev else None),
                     "change_pts": round(last - prev, 1) if prev else None,

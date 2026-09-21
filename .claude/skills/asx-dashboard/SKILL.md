@@ -224,6 +224,67 @@ intraday bars (`asxbrief`'s `bars` table) when available, otherwise the
 conservative default (assume stop) — never silently assumes target. As of
 2026-08-21 the current focus tickers have no intraday backfill started at
 all yet, so this will read at or near 100% conservative-default until that
+## `/setups` — end-of-day technical setup scanner (added 2026-09-21)
+
+`tradingagents/ta_indicators.py` (pure-pandas EMA/RSI-Wilder/MACD/TRIX/
+Bollinger, `indicator_frame`, `swing_pivots`), `ta_detectors.py` (the
+`SETUPS` registry: 12 tier-1 indicator setups + 4 tier-2 geometric patterns,
+each firing as `forming` or `confirmed`), `ta_setups.py` (scan / resolve /
+scorecard / backfill / hypothesis bridge). Page `web/static/setups.html`, nav
+"TechA" (renamed from "Setups" the same day). Tables in `swing.db`: `ta_detections` (PK scan_date, ticker,
+setup_id, state, source), `ta_scan_runs`, `ta_control`, `ta_setup_baseline`.
+
+**Timers.** `asx-ta-setups.timer` 15:40 Sydney Mon–Fri → `GET
+/api/setups/scan?store=true&limit=300` (top-300 of the asxbrief universe,
+2y daily via `screener.bulk_daily`, ~40s). `asx-ta-setups-resolve.timer`
+17:10 → `POST /api/setups/resolve?days_back=40`. Both paths (plus
+`/api/setups/backfill`) are in `_LOCAL_OR_AUTH_PATHS`. `scan()` returns
+`{skipped: "market closed"}` on non-sessions unless `force=true`; the page
+only ever reads the stored run (`/api/setups/latest`).
+
+**Why 15:40 matters.** The detection precedes the 16:10 closing auction, so
+"enter at the close" is a tradeable entry — the first module here where that
+is true (cf. the opening-auction lesson). The scorecard measures from that
+close; `delayed_5d_pct` (next-close entry) feeds the `delayed_entry` gate.
+
+**Provisional bar.** Verified 2026-09-21: yfinance's 1d download already
+contains today's in-progress row (~20 min delayed, no closing auction), so no
+hourly rebuild is needed; `_ensure_today_bar` only falls back to hourly bars
+for tickers whose frame lacks today. Volume rules divide by
+`provisional_vol_scale()` — the median `vol_at_scan / vol_eod` over resolved
+live rows, seed 0.6 until 10 sessions have resolved. `resolve()` also re-runs
+the detector on the completed bar and stores `state_at_close`, so the page
+can say how often the 15:40 view held ("at close" column).
+
+**Evidence layer.** `ta_control` = equal-weight forward return of every
+liquid ticker per date (filled by both backfill and resolve); excess =
+direction × (fwd − control); t-stat on date-clustered means. Badges:
+insufficient (<30 dates) / no edge / negative / watch / "edge (unvalidated)"
+(≥100 dates, t≥2.5, baseline survived). `first_in_window=0` marks a repeat of
+the same (ticker, setup, state) within 5 sessions and is excluded from all
+stats. The one-off `backfill()` (3y, completed bars, today's top-300 applied
+backwards — survivorship is declared) writes `source='backfill'` rows and runs
+each setup×state cell with n≥30 through `hypothesis.run()` (names `ta_<id>_<state>`,
+visible on `/research`), storing the verdict in `ta_setup_baseline`.
+`compute_baselines()` runs the gates twice so `n_passed` is honest.
+
+**Rule-tuning history (so it isn't re-derived).** First cut fired
+`ema20_reclaim/loss` "confirmed" on every bar for 5 days after a dip → now
+the first crossing bar only. The 3-bar EMA slope could never pass on the very
+dip the rule targets (the dip drags the EMA below its level 3 bars ago) → 10
+bars. `rsi_turn_up` now requires yesterday's RSI < 35 (was min of 3 bars).
+`asc_triangle` never fired at 1.5%/60% tolerances → 2.5%/70%.
+`pullback_ema20` can emit forming AND confirmed on one bar, which is why
+`state` is in the PK. Rules for the RSI/MACD/EMA20/TRIX family were lifted
+from github.com/Oft3r/agentic-trading-desk (MIT) `score.py::_flags`; the
+code was not (stdlib per-ticker loops).
+
+**Tests:** `tests/test_ta_setups.py` (22) — synthetic must-fire / near-miss
+per detector, a no-lookahead check (`detect_all(df[:t+1])` == `detect_history`
+at t), and scan→resolve→scorecard / backfill→hypothesis on a temp DB. Run with
+`.venv/bin/python -m unittest tests.test_ta_setups` (pytest is not installed
+in the venv).
+
 changes.
 
 **First real run's result — a genuine finding, not a bug** (verified by hand
@@ -1910,6 +1971,25 @@ later. `asx-signals-refresh.timer` (every 10 min) still runs too, now purely
 as a backstop in case the webhook call fails (e.g. this service was mid-restart
 when asxbrief polled). The page's "⚡ Classify now" button hits the same
 endpoint manually. If new announcements are ever going ungraded for more than
+**Futures panel (ES / NQ / SPI via IB Gateway)** — since 2026-09-07 the
+dashboard has a separate "Futures" section fed by `markets.py::refresh_futures`
+(one gateway session, `FUTURES_CONTRACTS`, delayed data type 4, persisted to
+`data/futures_cache.json`) and hit every 2 min by `asx-futures-refresh.timer`.
+`get_snapshot()` merges the cache in with `group: "futures"` and sets
+`futures_status` — `ok: false` (red "degraded" banner on the page) whenever
+any of ES/NQ/AP*0 is missing or older than 600s. `refresh_spi200` (the daily
+timer) is also IBKR-first now, Barchart only as fallback.
+**Front-contract selection (`_active_front_contract`) has bitten twice at
+the September roll:** (1) 2026-09-17/18 — IBKR returns expired contracts in the
+chain, so plain sorting picked the just-expired APU6 → no last → SPI silently
+absent; fixed by filtering `expiry >= today` (Sydney). (2) 2026-09-18 — SPI
+also lists *serial* months, so "nearest unexpired" became APV6 (October: 33
+contracts traded, `last = -1`) and SPI dropped again; fixed by preferring the
+quarterly cycle (month in 3/6/9/12; APZ6 had 25k volume the same minute).
+ES/NQ are quarterly-only so unaffected. If SPI vanishes again around a roll,
+run the contract chain by hand (`reqContractDetails(Future("SPI","SNFE","AUD"))`)
+and check what `_active_front_contract` picks before assuming the gateway is down.
+
 a few seconds, check the webhook first (`journalctl -u asxbrief | grep
 "signals webhook"`), not just the timer.
 
